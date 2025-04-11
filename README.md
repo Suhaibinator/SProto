@@ -1,0 +1,2 @@
+# SProto
+Protobuf registry
