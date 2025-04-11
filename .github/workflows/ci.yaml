@@ -85,7 +85,7 @@ jobs:
     # Only run on push to main branch, not on pull requests
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
-      contents: read # Default, needed for checkout
+      contents: write # Needed for checkout and for creating releases
       packages: write # Needed to push docker image to GHCR
     steps:
       - name: Checkout code
