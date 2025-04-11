@@ -23,10 +23,10 @@ The system comprises the following components:
 
 ```mermaid
 graph LR
-    Dev[Developer Machine<br/>(Proto Files)] --> CLI(Registry Client<br/>protoreg-cli);
-    CLI --> Server(Registry Server<br/>Go App in Docker);
-    Server --> DB[(PostgreSQL<br/>Metadata)];
-    Server --> S3[(MinIO / S3<br/>Artifacts)];
+    Dev["Developer Machine\n(Proto Files)"] --> CLI["Registry Client\nprotoreg-cli"];
+    CLI --> Server["Registry Server\nGo App in Docker"];
+    Server --> DB[(PostgreSQL\nMetadata)];
+    Server --> S3[(MinIO / S3\nArtifacts)];
 ```
 
 ## Getting Started (Local Development)
