@@ -61,3 +61,9 @@ func GetMinioClient() *minio.Client {
 	}
 	return MinioClient
 }
+
+// SetMinioClient is a test helper function to replace the global MinioClient instance with a mock.
+// !! Use only in tests !!
+func SetMinioClient(mockClient *minio.Client) {
+	MinioClient = mockClient
+}

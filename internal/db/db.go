@@ -54,3 +54,9 @@ func GetDB() *gorm.DB {
 	}
 	return DB
 }
+
+// SetDB is a test helper function to replace the global DB instance with a mock.
+// !! Use only in tests !!
+func SetDB(mockDB *gorm.DB) {
+	DB = mockDB
+}

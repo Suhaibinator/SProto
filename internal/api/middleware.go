@@ -9,6 +9,11 @@ import (
 	"github.com/Suhaibinator/SProto/internal/api/response" // We'll create this package next
 )
 
+// contextKey is a custom type used for context keys to avoid collisions.
+type contextKey string
+
+const isAuthenticatedKey contextKey = "isAuthenticated"
+
 // AuthMiddleware creates a middleware function that checks for a static bearer token.
 func AuthMiddleware(requiredToken string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
@@ -37,7 +42,7 @@ func AuthMiddleware(requiredToken string) func(http.Handler) http.Handler {
 
 			// Token is valid, proceed to the next handler
 			// Optionally, add user info to context if using more complex auth
-			ctx := context.WithValue(r.Context(), "isAuthenticated", true)
+			ctx := context.WithValue(r.Context(), isAuthenticatedKey, true)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
