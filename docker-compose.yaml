@@ -1,13 +1,11 @@
 services:
   postgres:
-    image: postgres:15 # Using a specific version is generally recommended
+    image: postgres:17 # Using a specific version is generally recommended
     container_name: sproto_postgres
     environment:
       POSTGRES_USER: postgres # Default user
       POSTGRES_PASSWORD: postgres # Default password - CHANGE FOR PRODUCTION
       POSTGRES_DB: sproto # Database name used in default DSN
-    ports:
-      - "5432:5432" # Map host port 5432 to container port 5432
     volumes:
       - postgres_data:/var/lib/postgresql/data # Persist data
       - ./sql:/docker-entrypoint-initdb.d # Mount SQL scripts for initialization
@@ -24,9 +22,6 @@ services:
     environment:
       MINIO_ROOT_USER: minioadmin # Default access key - CHANGE FOR PRODUCTION
       MINIO_ROOT_PASSWORD: minioadmin # Default secret key - CHANGE FOR PRODUCTION
-    ports:
-      - "9001:9000" # API port (Changed host port to 9001 due to conflict)
-      - "9090:9090" # Console port
     volumes:
       - minio_data:/data # Persist data
     command: server /data --console-address ":9090"

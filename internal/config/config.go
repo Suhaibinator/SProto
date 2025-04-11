@@ -10,9 +10,15 @@ type Config struct {
 	ServerPort string `mapstructure:"SERVER_PORT"`
 
 	// Database configuration
-	DbDsn string `mapstructure:"DB_DSN"` // Data Source Name (e.g., "host=localhost user=user password=pass dbname=sproto port=5432 sslmode=disable")
+	DbType     string `mapstructure:"DB_TYPE"`     // "postgres" or "sqlite"
+	DbDsn      string `mapstructure:"DB_DSN"`      // Data Source Name for Postgres
+	SqlitePath string `mapstructure:"SQLITE_PATH"` // Path for SQLite database file
 
-	// MinIO configuration
+	// Storage configuration
+	StorageType      string `mapstructure:"STORAGE_TYPE"`       // "minio" or "local"
+	LocalStoragePath string `mapstructure:"LOCAL_STORAGE_PATH"` // Path for local file storage
+
+	// MinIO specific configuration (only used if StorageType is "minio")
 	MinioEndpoint  string `mapstructure:"MINIO_ENDPOINT"`
 	MinioAccessKey string `mapstructure:"MINIO_ACCESS_KEY"`
 	MinioSecretKey string `mapstructure:"MINIO_SECRET_KEY"`
@@ -30,7 +36,11 @@ type Config struct {
 func LoadConfig() (config Config, err error) {
 	// Set default values
 	viper.SetDefault("SERVER_PORT", "8080")
+	viper.SetDefault("DB_TYPE", "postgres") // Default to postgres
 	viper.SetDefault("DB_DSN", "host=localhost user=postgres password=postgres dbname=sproto port=5432 sslmode=disable")
+	viper.SetDefault("SQLITE_PATH", "sproto.db")               // Default SQLite path
+	viper.SetDefault("STORAGE_TYPE", "minio")                  // Default to minio
+	viper.SetDefault("LOCAL_STORAGE_PATH", "./sproto-storage") // Default local storage path
 	viper.SetDefault("MINIO_ENDPOINT", "localhost:9000")
 	viper.SetDefault("MINIO_ACCESS_KEY", "minioadmin")
 	viper.SetDefault("MINIO_SECRET_KEY", "minioadmin")

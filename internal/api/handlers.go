@@ -3,6 +3,7 @@ package api
 import (
 	"log"
 	"net/http"
+	"os"
 	"sort"
 	"strings"
 
@@ -12,22 +13,17 @@ import (
 	"io"
 	"net/url"
 
-	// "strings" // Removed duplicate import line
-
-	"github.com/Masterminds/semver/v3" // For potential semantic version sorting later
-	"github.com/minio/minio-go/v7"     // Added import (using v7)
+	"github.com/Masterminds/semver/v3"
 
 	"crypto/sha256"
 	"encoding/hex"
 	"time"
 
 	"github.com/Suhaibinator/SProto/internal/api/response"
-	"github.com/Suhaibinator/SProto/internal/config" // Need config for Minio Bucket
 	"github.com/Suhaibinator/SProto/internal/db"
 	"github.com/Suhaibinator/SProto/internal/models"
 
-	"github.com/Suhaibinator/SProto/internal/storage" // Need storage client
-	// Will be needed
+	"github.com/Suhaibinator/SProto/internal/storage"
 	"github.com/gorilla/mux"
 	"gorm.io/gorm"
 )
@@ -187,49 +183,39 @@ func FetchModuleVersionArtifactHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get MinIO client and bucket name from config (assuming config is loaded globally or passed somehow)
-	// For simplicity here, let's assume config is accessible or re-load it.
-	// A better approach would be dependency injection.
-	cfg, err := config.LoadConfig() // Re-loading config here is not ideal, should be injected
+	// Get the storage provider
+	storageProvider := storage.GetStorageProvider()
+
+	// Get the artifact stream from the storage provider
+	artifactStream, err := storageProvider.DownloadFile(r.Context(), moduleVersion.ArtifactStorageKey)
 	if err != nil {
-		log.Printf("Error loading config for MinIO bucket: %v", err)
-		response.Error(w, http.StatusInternalServerError, "Internal server error (config)")
+		// Check if it's a 'not found' error specifically if possible (depends on provider impl)
+		// Note: Need to import "os" for os.ErrNotExist
+		if errors.Is(err, os.ErrNotExist) || strings.Contains(strings.ToLower(err.Error()), "not found") || strings.Contains(strings.ToLower(err.Error()), "no such key") {
+			log.Printf("Artifact not found in storage: key=%s, error=%v", moduleVersion.ArtifactStorageKey, err)
+			response.Error(w, http.StatusNotFound, "Artifact not found in storage")
+		} else {
+			log.Printf("Error downloading artifact from storage: key=%s, error=%v", moduleVersion.ArtifactStorageKey, err)
+			response.Error(w, http.StatusInternalServerError, "Failed to retrieve artifact from storage")
+		}
 		return
 	}
-	minioClient := storage.GetMinioClient()
-	bucketName := cfg.MinioBucket
-
-	// Get the object from MinIO
-	object, err := minioClient.GetObject(r.Context(), bucketName, moduleVersion.ArtifactStorageKey, minio.GetObjectOptions{})
-	if err != nil {
-		log.Printf("Error getting object '%s' from bucket '%s': %v", moduleVersion.ArtifactStorageKey, bucketName, err)
-		response.Error(w, http.StatusInternalServerError, "Failed to retrieve artifact from storage")
-		return
-	}
-	defer object.Close() // Ensure the object reader is closed
-
-	// Stat the object to get metadata like size (optional but good)
-	objInfo, err := object.Stat()
-	if err != nil {
-		log.Printf("Error stating object '%s' from bucket '%s': %v", moduleVersion.ArtifactStorageKey, bucketName, err)
-		// Don't necessarily fail the request, but log it. We can still try to stream.
-	}
+	defer artifactStream.Close() // Ensure the stream is closed
 
 	// Set headers
-	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Type", "application/zip") // Assuming all artifacts are zip
 	// Encode filename according to RFC 5987 for broader compatibility
 	encodedFilename := url.PathEscape(fmt.Sprintf("%s.zip", version))
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"; filename*=UTF-8''%s`, version+".zip", encodedFilename))
 	if moduleVersion.ArtifactDigest != "" {
-		// Use the stored digest as ETag. Note: MinIO might set its own ETag based on object hash.
+		// Use the stored digest as ETag.
 		w.Header().Set("ETag", fmt.Sprintf(`"%s"`, moduleVersion.ArtifactDigest))
 	}
-	if objInfo.Size > 0 {
-		w.Header().Set("Content-Length", fmt.Sprintf("%d", objInfo.Size))
-	}
+	// Content-Length is harder to determine reliably beforehand with the abstraction, removed for now.
+	// If needed later, the StorageProvider interface could be extended with a StatFile method.
 
-	// Stream the object content to the response writer
-	_, err = io.Copy(w, object)
+	// Stream the artifact content to the response writer
+	_, err = io.Copy(w, artifactStream)
 	if err != nil {
 		// This error might happen if the client disconnects mid-stream
 		log.Printf("Error streaming artifact %s/%s@%s to client: %v", namespace, moduleName, version, err)
@@ -311,9 +297,9 @@ func PublishModuleVersionHandler(w http.ResponseWriter, r *http.Request) {
 
 	// --- Database and Storage Operations (Transaction) ---
 	gormDB := db.GetDB()
-	minioClient := storage.GetMinioClient()
-	cfg, _ := config.LoadConfig() // Assuming config is loaded or accessible
-	bucketName := cfg.MinioBucket
+	storageProvider := storage.GetStorageProvider() // Get the initialized provider
+	// cfg, _ := config.LoadConfig() // Config likely not needed directly here anymore
+	// bucketName := cfg.MinioBucket // Bucket name is handled within the provider
 
 	var module models.Module
 	var moduleVersion models.ModuleVersion
@@ -365,18 +351,15 @@ func PublishModuleVersionHandler(w http.ResponseWriter, r *http.Request) {
 	// Reset err as ErrRecordNotFound is expected if version doesn't exist
 	err = nil
 
-	// 3. Upload to MinIO (using the TeeReader)
-	storageKey = fmt.Sprintf("modules/%s/%s/protos.zip", module.ID.String(), versionStr)
-	uploadInfo, err := minioClient.PutObject(r.Context(), bucketName, storageKey, teeReader, header.Size, minio.PutObjectOptions{
-		ContentType: "application/zip",
-		// Add user metadata if needed: UserMetadata: map[string]string{"module": fmt.Sprintf("%s/%s", namespace, moduleName)},
-	})
+	// 3. Upload to Storage Provider (using the TeeReader)
+	storageKey = fmt.Sprintf("modules/%s/%s/protos.zip", module.ID.String(), versionStr) // Define storage key structure
+	err = storageProvider.UploadFile(r.Context(), storageKey, teeReader, header.Size, "application/zip")
 	if err != nil {
-		log.Printf("Error uploading artifact to MinIO (Bucket: %s, Key: %s): %v", bucketName, storageKey, err)
+		log.Printf("Error uploading artifact to storage (Key: %s): %v", storageKey, err)
 		response.Error(w, http.StatusInternalServerError, "Failed to upload artifact to storage")
 		return // Triggers deferred rollback
 	}
-	log.Printf("Successfully uploaded %s of size %d to %s/%s", header.Filename, uploadInfo.Size, bucketName, storageKey)
+	log.Printf("Successfully uploaded %s (Key: %s, Size: %d)", header.Filename, storageKey, header.Size)
 
 	// 4. Get the final digest
 	artifactDigestHex = hex.EncodeToString(hasher.Sum(nil))

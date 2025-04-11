@@ -7,7 +7,8 @@ SProto is a lightweight, self-hostable registry for managing Protobuf (`.proto`)
 ## Features
 
 *   **Module Versioning:** Store immutable, versioned snapshots of Protobuf modules.
-*   **Artifact Storage:** Stores `.proto` files as zip archives in an S3-compatible object store (MinIO by default).
+*   **Artifact Storage:** Stores `.proto` files as zip archives in an S3-compatible object store (MinIO by default) or the local filesystem.
+*   **Database:** Uses PostgreSQL (default) or SQLite for metadata storage.
 *   **Simple API:** RESTful API for publishing, fetching, and listing modules and versions.
 *   **CLI Client:** `protoreg-cli` for easy interaction with the registry from the command line.
 *   **Dockerized:** Easily deployable using Docker and Docker Compose.
@@ -73,16 +74,60 @@ The easiest way to run the complete system locally is using Docker Compose.
 
 The registry server (`registry-server` service in `docker-compose.yaml`) is configured primarily through environment variables. These can be set directly in the `docker-compose.yaml` file or passed through other means if deploying differently.
 
-| Environment Variable        | Default Value                                                            | Description                                                                 |
-| :-------------------------- | :----------------------------------------------------------------------- | :-------------------------------------------------------------------------- |
-| `PROTOREG_SERVER_PORT`      | `8080`                                                                   | Port the registry server listens on.                                        |
-| `PROTOREG_DB_DSN`           | `host=postgres user=postgres password=postgres dbname=sproto port=5432 sslmode=disable` | PostgreSQL Data Source Name.                                                |
-| `PROTOREG_MINIO_ENDPOINT`   | `minio:9000`                                                             | MinIO server endpoint (use service name within Docker Compose).             |
-| `PROTOREG_MINIO_ACCESS_KEY` | `minioadmin`                                                             | MinIO access key. **Change for production!**                                |
-| `PROTOREG_MINIO_SECRET_KEY` | `minioadmin`                                                             | MinIO secret key. **Change for production!**                                |
-| `PROTOREG_MINIO_BUCKET`     | `sproto-artifacts`                                                       | Name of the MinIO bucket to store artifacts. Will be created if it doesn't exist. |
-| `PROTOREG_MINIO_USE_SSL`    | `false`                                                                  | Whether to use SSL/TLS when connecting to MinIO.                            |
-| `PROTOREG_AUTH_TOKEN`       | `supersecrettoken`                                                       | Static bearer token required for publishing. **Change for production!**     |
+**Backend Selection:**
+
+| Environment Variable        | Default Value | Description                                                                                                |
+| :-------------------------- | :------------ | :--------------------------------------------------------------------------------------------------------- |
+| `PROTOREG_DB_TYPE`          | `postgres`    | Selects the database backend. Options: `postgres`, `sqlite`.                                               |
+| `PROTOREG_STORAGE_TYPE`     | `minio`       | Selects the artifact storage backend. Options: `minio`, `local`.                                           |
+
+**PostgreSQL Configuration (if `PROTOREG_DB_TYPE=postgres`):**
+
+| Environment Variable        | Default Value                                                            | Description                  |
+| :-------------------------- | :----------------------------------------------------------------------- | :--------------------------- |
+| `PROTOREG_DB_DSN`           | `host=postgres user=postgres password=postgres dbname=sproto port=5432 sslmode=disable` | PostgreSQL Data Source Name. |
+
+**SQLite Configuration (if `PROTOREG_DB_TYPE=sqlite`):**
+
+| Environment Variable        | Default Value | Description                                      |
+| :-------------------------- | :------------ | :----------------------------------------------- |
+| `PROTOREG_SQLITE_PATH`      | `sproto.db`   | Path to the SQLite database file (relative to server working directory or absolute). |
+
+**MinIO Configuration (if `PROTOREG_STORAGE_TYPE=minio`):**
+
+| Environment Variable        | Default Value        | Description                                                                 |
+| :-------------------------- | :------------------- | :-------------------------------------------------------------------------- |
+| `PROTOREG_MINIO_ENDPOINT`   | `minio:9000`         | MinIO server endpoint (use service name within Docker Compose).             |
+| `PROTOREG_MINIO_ACCESS_KEY` | `minioadmin`         | MinIO access key. **Change for production!**                                |
+| `PROTOREG_MINIO_SECRET_KEY` | `minioadmin`         | MinIO secret key. **Change for production!**                                |
+| `PROTOREG_MINIO_BUCKET`     | `sproto-artifacts`   | Name of the MinIO bucket to store artifacts. Will be created if it doesn't exist. |
+| `PROTOREG_MINIO_USE_SSL`    | `false`              | Whether to use SSL/TLS when connecting to MinIO.                            |
+
+**Local Storage Configuration (if `PROTOREG_STORAGE_TYPE=local`):**
+
+| Environment Variable             | Default Value        | Description                                                              |
+| :------------------------------- | :------------------- | :----------------------------------------------------------------------- |
+| `PROTOREG_LOCAL_STORAGE_PATH`    | `./sproto-storage`   | Path to the directory for storing artifacts (relative to server working directory or absolute). |
+
+**Common Configuration:**
+
+| Environment Variable        | Default Value      | Description                                                                 |
+| :-------------------------- | :----------------- | :-------------------------------------------------------------------------- |
+| `PROTOREG_SERVER_PORT`      | `8080`             | Port the registry server listens on.                                        |
+| `PROTOREG_AUTH_TOKEN`       | `supersecrettoken` | Static bearer token required for publishing. **Change for production!**     |
+
+### Lite Mode (SQLite + Local Storage)
+
+For simpler deployments or local testing without external dependencies like PostgreSQL and MinIO, you can run SProto in "Lite Mode":
+
+1.  **Set Environment Variables:**
+    *   `PROTOREG_DB_TYPE=sqlite`
+    *   `PROTOREG_STORAGE_TYPE=local`
+    *   (Optional) `PROTOREG_SQLITE_PATH=/path/to/your/database.db`
+    *   (Optional) `PROTOREG_LOCAL_STORAGE_PATH=/path/to/your/artifact/storage`
+2.  **Run the Server:** You can run the server binary directly or adapt the `docker-compose.yaml` to remove the `postgres` and `minio` services and set the environment variables for the `registry-server` service. You might need to mount volumes for the SQLite DB file and local storage path if running in Docker.
+
+**Note:** When using Lite Mode, ensure the server process has write permissions to the specified SQLite file path and local storage directory. Data will persist on the filesystem where the server is running.
 
 ## Security Considerations
 

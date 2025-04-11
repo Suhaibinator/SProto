@@ -4,7 +4,7 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/Suhaibinator/SProto/internal/api" // Import the api package
+	"github.com/Suhaibinator/SProto/internal/api"
 	"github.com/Suhaibinator/SProto/internal/config"
 	"github.com/Suhaibinator/SProto/internal/db"
 	"github.com/Suhaibinator/SProto/internal/storage"
@@ -18,16 +18,16 @@ func main() {
 		log.Fatalf("Failed to load configuration: %v", err)
 	}
 
-	// Initialize Database
-	_, err = db.Init(cfg.DbDsn)
+	// Initialize Database (Postgres or SQLite)
+	_, err = db.Init(cfg) // Pass the whole config struct
 	if err != nil {
 		log.Fatalf("Failed to initialize database: %v", err)
 	}
 
-	// Initialize MinIO Storage
-	_, err = storage.InitMinio(cfg)
+	// Initialize Storage (Minio or Local)
+	_, err = storage.InitStorage(cfg) // Use the new unified storage init
 	if err != nil {
-		log.Fatalf("Failed to initialize MinIO storage: %v", err)
+		log.Fatalf("Failed to initialize storage: %v", err) // Updated error message
 	}
 
 	// Initialize Router
