@@ -1,0 +1,69 @@
+services:
+  postgres:
+    image: postgres:15 # Using a specific version is generally recommended
+    container_name: sproto_postgres
+    environment:
+      POSTGRES_USER: postgres # Default user
+      POSTGRES_PASSWORD: postgres # Default password - CHANGE FOR PRODUCTION
+      POSTGRES_DB: sproto # Database name used in default DSN
+    ports:
+      - "5432:5432" # Map host port 5432 to container port 5432
+    volumes:
+      - postgres_data:/var/lib/postgresql/data # Persist data
+      - ./sql:/docker-entrypoint-initdb.d # Mount SQL scripts for initialization
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d sproto"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  minio:
+    image: minio/minio:latest
+    container_name: sproto_minio
+    environment:
+      MINIO_ROOT_USER: minioadmin # Default access key - CHANGE FOR PRODUCTION
+      MINIO_ROOT_PASSWORD: minioadmin # Default secret key - CHANGE FOR PRODUCTION
+    ports:
+      - "9001:9000" # API port (Changed host port to 9001 due to conflict)
+      - "9090:9090" # Console port
+    volumes:
+      - minio_data:/data # Persist data
+    command: server /data --console-address ":9090"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  registry-server:
+    build:
+      context: .
+      dockerfile: Dockerfile # We'll create this next
+    container_name: sproto_registry_server
+    ports:
+      - "8080:8080" # Map host port 8080 to container port 8080 (default)
+    environment:
+      # These should match the defaults in config.go or be overridden
+      PROTOREG_SERVER_PORT: 8080
+      PROTOREG_DB_DSN: "host=postgres user=postgres password=postgres dbname=sproto port=5432 sslmode=disable" # Use service name 'postgres'
+      PROTOREG_MINIO_ENDPOINT: "minio:9000" # Internal endpoint remains the same
+      PROTOREG_MINIO_ACCESS_KEY: minioadmin
+      PROTOREG_MINIO_SECRET_KEY: minioadmin
+      PROTOREG_MINIO_BUCKET: sproto-artifacts
+      PROTOREG_MINIO_USE_SSL: "false"
+      PROTOREG_AUTH_TOKEN: "supersecrettoken" # CHANGE FOR PRODUCTION
+    depends_on:
+      postgres:
+        condition: service_healthy # Wait for postgres to be ready
+      minio:
+        condition: service_healthy # Wait for minio to be ready
+    restart: unless-stopped
+    # Add volumes for live code reloading during development if needed
+    # volumes:
+    #   - .:/app
+
+volumes:
+  postgres_data:
+  minio_data:
