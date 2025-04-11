@@ -138,11 +138,15 @@ jobs:
         run: GOOS=windows GOARCH=arm64 go build -v -o ./build/sproto-cli-windows-arm64.exe ./cmd/cli
 
       # --- Create GitHub Release and Upload Assets ---
+      - name: Generate release tag name
+        id: generate_tag
+        run: echo "tag_name=release-$(date +'%Y%m%d%H%M%S')-${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
+
       - name: Create Release and Upload Assets
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.sha }}
-          name: Release ${{ github.sha }}
+          tag_name: ${{ steps.generate_tag.outputs.tag_name }}
+          name: Release ${{ steps.generate_tag.outputs.tag_name }} (Commit ${{ github.sha }})
           body: "Automated release based on commit ${{ github.sha }}"
           draft: false
           prerelease: false
