@@ -246,8 +246,8 @@ func init() {
 	// Required flags for publish command
 	publishCmd.Flags().StringVarP(&publishModuleName, "module", "m", "", "Full module name (namespace/name) (required)")
 	publishCmd.Flags().StringVarP(&publishVersion, "version", "v", "", "Semantic version for the artifact (e.g., v1.2.3) (required)")
-	publishCmd.MarkFlagRequired("module")
-	publishCmd.MarkFlagRequired("version")
+	_ = publishCmd.MarkFlagRequired("module")
+	_ = publishCmd.MarkFlagRequired("version")
 
 	// Inherits --registry-url and --api-token from root persistent flags
 }

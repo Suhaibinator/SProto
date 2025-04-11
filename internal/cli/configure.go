@@ -39,7 +39,7 @@ This command updates the configuration file directly.`,
 
 		if !urlFlagSet && !tokenFlagSet {
 			log.Error("At least one flag (--registry-url or --api-token) must be provided")
-			cmd.Usage() // Show usage information
+			_ = cmd.Usage() // Show usage information
 			os.Exit(1)
 		}
 

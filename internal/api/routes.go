@@ -32,6 +32,6 @@ func RegisterRoutes(router *mux.Router, authToken string) {
 	// --- Health Check (Outside API versioning for simplicity) ---
 	router.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
+		_, _ = w.Write([]byte("OK")) // Explicitly ignore error
 	}).Methods("GET")
 }

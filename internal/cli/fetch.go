@@ -117,7 +117,9 @@ Example:
 
 			if f.FileInfo().IsDir() {
 				// Create directory
-				os.MkdirAll(fpath, os.ModePerm) // Use ModePerm for simplicity, could use f.Mode()
+				if err := os.MkdirAll(fpath, os.ModePerm); err != nil { // Use ModePerm for simplicity, could use f.Mode()
+					log.Fatal("Failed to create directory from zip", zap.String("path", fpath), zap.Error(err))
+				}
 				continue
 			}
 
@@ -162,5 +164,5 @@ func init() {
 
 	// Required flag for output directory
 	fetchCmd.Flags().StringVarP(&fetchOutputDir, "output", "o", "", "Base directory to extract proto files into (required)")
-	fetchCmd.MarkFlagRequired("output")
+	_ = fetchCmd.MarkFlagRequired("output")
 }

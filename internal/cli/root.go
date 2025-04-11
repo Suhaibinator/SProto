@@ -52,8 +52,8 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", "info", "Set logging level (debug, info, warn, error)")
 
 	// Bind persistent flags to Viper
-	viper.BindPFlag("registry_url", rootCmd.PersistentFlags().Lookup("registry-url"))
-	viper.BindPFlag("api_token", rootCmd.PersistentFlags().Lookup("api-token"))
+	_ = viper.BindPFlag("registry_url", rootCmd.PersistentFlags().Lookup("registry-url"))
+	_ = viper.BindPFlag("api_token", rootCmd.PersistentFlags().Lookup("api-token"))
 	// Note: We don't bind cfgFile or logLevel to viper directly, they control viper/logger setup.
 }
 
