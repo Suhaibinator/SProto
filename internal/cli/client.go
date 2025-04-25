@@ -9,7 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Suhaibinator/SProto/internal/api" // Import API response types
+	"github.com/Suhaibinator/SProto/internal/api"      // Import API response types
+	"github.com/Suhaibinator/SProto/internal/resolver" // Added import
 	"go.uber.org/zap"
 )
 
@@ -35,20 +36,10 @@ func NewRegistryClient(registryURL, apiToken string, logger *zap.Logger) *Regist
 	}
 }
 
-// FetchModuleMetadata retrieves module details (including import path and latest version) from the registry.
-// Corresponds to GET /api/v1/modules/{namespace}/{module_name} but adapted to return ModuleInfo.
-// Note: The API currently returns versions, not full Module metadata here.
-// We might need a new API endpoint or adapt existing ones.
-// For now, let's fetch versions and infer latest, and maybe need a separate call for import path if not in list.
-// Re-reading Task 1.3.3, the ListModulesHandler *does* include import_path.
-// Let's adapt to fetch a single module's details if possible, or fetch all and filter.
-// The API spec in README shows GET /api/v1/modules/{namespace}/{module_name} lists versions.
-// GET /api/v1/modules lists modules with latest version.
-// We need a way to get a single module's full metadata including import path.
-// Let's assume for now we can fetch all modules and find the one we need.
-// TODO: Consider adding a dedicated GET /api/v1/modules/{namespace}/{module_name}/metadata endpoint if needed.
-func (c *RegistryClient) FetchModuleMetadata(namespace, name string) (*api.ModuleInfo, error) {
-	c.Logger.Debug("Fetching module metadata", zap.String("namespace", namespace), zap.String("name", name))
+// GetModuleInfo implements the resolver.RegistryAccessor interface.
+// Retrieves module details including namespace, name, and import path.
+func (c *RegistryClient) GetModuleInfo(namespace, name string) (*resolver.ModuleInfo, error) {
+	c.Logger.Debug("Fetching module metadata (GetModuleInfo)", zap.String("namespace", namespace), zap.String("name", name))
 
 	// Fetch all modules and filter client-side for now
 	allModules, err := c.FetchAllModules()
@@ -56,10 +47,16 @@ func (c *RegistryClient) FetchModuleMetadata(namespace, name string) (*api.Modul
 		return nil, fmt.Errorf("failed to fetch all modules to find metadata for %s/%s: %w", namespace, name, err)
 	}
 
-	for _, moduleInfo := range allModules {
-		if moduleInfo.Namespace == namespace && moduleInfo.Name == name {
+	for _, apiModuleInfo := range allModules {
+		if apiModuleInfo.Namespace == namespace && apiModuleInfo.Name == name {
 			c.Logger.Debug("Found module metadata", zap.String("module", fmt.Sprintf("%s/%s", namespace, name)))
-			return &moduleInfo, nil
+			// Convert api.ModuleInfo to resolver.ModuleInfo
+			resolverInfo := &resolver.ModuleInfo{
+				Namespace:  apiModuleInfo.Namespace,
+				Name:       apiModuleInfo.Name,
+				ImportPath: apiModuleInfo.ImportPath,
+			}
+			return resolverInfo, nil
 		}
 	}
 
@@ -68,6 +65,7 @@ func (c *RegistryClient) FetchModuleMetadata(namespace, name string) (*api.Modul
 
 // FetchAllModules retrieves metadata for all modules from the registry.
 // Corresponds to GET /api/v1/modules.
+// Note: Returns api.ModuleInfo, used internally by GetModuleInfo.
 func (c *RegistryClient) FetchAllModules() ([]api.ModuleInfo, error) {
 	c.Logger.Debug("Fetching all modules")
 	targetURL := fmt.Sprintf("%s/api/v1/modules", c.RegistryURL)
@@ -97,10 +95,10 @@ func (c *RegistryClient) FetchAllModules() ([]api.ModuleInfo, error) {
 	return listResp.Modules, nil
 }
 
-// FetchModuleVersions retrieves all versions for a specific module.
-// Corresponds to GET /api/v1/modules/{namespace}/{module_name}.
-func (c *RegistryClient) FetchModuleVersions(namespace, name string) ([]string, error) {
-	c.Logger.Debug("Fetching module versions", zap.String("namespace", namespace), zap.String("name", name))
+// GetModuleVersions implements the resolver.RegistryAccessor interface.
+// Retrieves all available versions for a specific module.
+func (c *RegistryClient) GetModuleVersions(namespace, name string) ([]string, error) {
+	c.Logger.Debug("Fetching module versions (GetModuleVersions)", zap.String("namespace", namespace), zap.String("name", name))
 	// URL encode path segments
 	encodedNamespace := url.PathEscape(namespace)
 	encodedName := url.PathEscape(name)
@@ -162,10 +160,10 @@ func (c *RegistryClient) FetchArtifact(namespace, name, version string) (io.Read
 	return resp.Body, nil // Caller is responsible for closing the body
 }
 
-// FetchModuleDependencies retrieves the list of dependencies for a specific module.
-// Corresponds to GET /api/v1/modules/{namespace}/{module_name}/dependencies.
-func (c *RegistryClient) FetchModuleDependencies(namespace, name string) ([]api.DependencyResponse, error) {
-	c.Logger.Debug("Fetching module dependencies", zap.String("namespace", namespace), zap.String("name", name))
+// GetModuleDependencies implements the resolver.RegistryAccessor interface.
+// Retrieves a list of dependencies for a specific module.
+func (c *RegistryClient) GetModuleDependencies(namespace, name string) ([]resolver.DependencyInfo, error) {
+	c.Logger.Debug("Fetching module dependencies (GetModuleDependencies)", zap.String("namespace", namespace), zap.String("name", name))
 	// URL encode path segments
 	encodedNamespace := url.PathEscape(namespace)
 	encodedName := url.PathEscape(name)
@@ -202,12 +200,116 @@ func (c *RegistryClient) FetchModuleDependencies(namespace, name string) ([]api.
 	}
 
 	c.Logger.Debug("Successfully fetched module dependencies", zap.String("module", fmt.Sprintf("%s/%s", namespace, name)), zap.Int("count", len(listResp.Dependencies)))
-	// Ensure empty slice, not null, if no dependencies
-	if listResp.Dependencies == nil {
-		return []api.DependencyResponse{}, nil
+
+	// Convert api.DependencyResponse to resolver.DependencyInfo
+	resolverDeps := make([]resolver.DependencyInfo, 0, len(listResp.Dependencies))
+	if listResp.Dependencies != nil {
+		for _, dep := range listResp.Dependencies {
+			resolverDeps = append(resolverDeps, resolver.DependencyInfo{
+				Namespace:         dep.Namespace,
+				Name:              dep.Name,
+				VersionConstraint: dep.VersionConstraint,
+				// ImportPath is not part of DependencyInfo, it's fetched via GetModuleInfo
+			})
+		}
 	}
-	return listResp.Dependencies, nil
+
+	return resolverDeps, nil
 }
 
-// TODO: Add method for resolving dependencies (Task 1.3.2 endpoint)
-// TODO: Add method for publishing (adapt from internal/cli/publish.go)
+// -- Backward Compatibility Methods --
+
+// FetchModuleMetadata is a backward-compatibility wrapper around GetModuleInfo.
+// This maintains compatibility with existing code that expects the old method.
+func (c *RegistryClient) FetchModuleMetadata(namespace, name string) (*api.ModuleInfo, error) {
+	resolverInfo, err := c.GetModuleInfo(namespace, name)
+	if err != nil {
+		return nil, err
+	}
+	// Convert resolver.ModuleInfo back to api.ModuleInfo
+	return &api.ModuleInfo{
+		Namespace:  resolverInfo.Namespace,
+		Name:       resolverInfo.Name,
+		ImportPath: resolverInfo.ImportPath,
+	}, nil
+}
+
+// FetchModuleVersions is a backward-compatibility wrapper around GetModuleVersions.
+// This maintains compatibility with existing code that expects the old method.
+func (c *RegistryClient) FetchModuleVersions(namespace, name string) ([]string, error) {
+	return c.GetModuleVersions(namespace, name)
+}
+
+// FetchModuleDependencies is a backward-compatibility wrapper around GetModuleDependencies.
+// This maintains compatibility with existing code that expects the old method.
+func (c *RegistryClient) FetchModuleDependencies(namespace, name string) ([]api.DependencyResponse, error) {
+	resolverDeps, err := c.GetModuleDependencies(namespace, name)
+	if err != nil {
+		return nil, err
+	}
+	// Convert resolver.DependencyInfo to api.DependencyResponse
+	apiDeps := make([]api.DependencyResponse, 0, len(resolverDeps))
+	for _, dep := range resolverDeps {
+		apiDeps = append(apiDeps, api.DependencyResponse{
+			Namespace:         dep.Namespace,
+			Name:              dep.Name,
+			VersionConstraint: dep.VersionConstraint,
+			// ImportPath will be empty, but should not be needed by existing code
+		})
+	}
+	return apiDeps, nil
+}
+
+// ResolveDependencies resolves the dependencies for a module using the registry API
+// This method redirects to the server-side dependency resolution endpoint (Task 1.3.2)
+func (c *RegistryClient) ResolveDependencies(namespace, name, version string) (map[string]string, error) {
+	c.Logger.Debug("Resolving dependencies via API",
+		zap.String("module", fmt.Sprintf("%s/%s@%s", namespace, name, version)))
+
+	// URL encode path segments
+	encodedNamespace := url.PathEscape(namespace)
+	encodedName := url.PathEscape(name)
+	encodedVersion := url.PathEscape(version)
+	targetURL := fmt.Sprintf("%s/api/v1/modules/%s/%s/%s/resolve",
+		c.RegistryURL, encodedNamespace, encodedName, encodedVersion)
+
+	req, err := http.NewRequest("GET", targetURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request to resolve dependencies: %w", err)
+	}
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve dependencies from %s: %w", targetURL, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("failed to resolve dependencies: received status %d %s, body: %s",
+			resp.StatusCode, http.StatusText(resp.StatusCode), string(bodyBytes))
+	}
+
+	// Use the generic map structure to avoid type errors since the API structure
+	// already exists in handlers.go
+	var resolveResp map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&resolveResp); err != nil {
+		return nil, fmt.Errorf("failed to decode resolve dependencies response: %w", err)
+	}
+
+	// Extract the resolved_dependencies map
+	resolvedDeps := make(map[string]string)
+	if depMap, ok := resolveResp["resolved_dependencies"].(map[string]interface{}); ok {
+		for modID, version := range depMap {
+			if versionStr, ok := version.(string); ok {
+				resolvedDeps[modID] = versionStr
+			}
+		}
+	}
+
+	c.Logger.Debug("Successfully resolved dependencies via API",
+		zap.String("module", fmt.Sprintf("%s/%s@%s", namespace, name, version)),
+		zap.Int("resolved_count", len(resolvedDeps)))
+
+	return resolvedDeps, nil
+}

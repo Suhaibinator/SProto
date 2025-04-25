@@ -3,6 +3,8 @@ package cache
 import (
 	"archive/zip"
 	"bytes"
+	"crypto/sha256" // Added import
+	"encoding/hex"  // Added import
 	"encoding/json"
 	"fmt"
 	"io"
@@ -37,17 +39,29 @@ func (c *Cache) PutArtifact(namespace, name, version string, reader io.Reader) e
 		return fmt.Errorf("failed to create module directory: %w", err)
 	}
 
-	// Read entire artifact into memory for operations
-	artifactData, err := io.ReadAll(reader)
+	// Create artifact file
+	artifactPath := filepath.Join(modulePath, ArtifactFile)
+	outFile, err := os.Create(artifactPath)
 	if err != nil {
-		return fmt.Errorf("failed to read artifact data: %w", err)
+		return fmt.Errorf("failed to create artifact file: %w", err)
+	}
+	defer outFile.Close()
+
+	// Calculate SHA256 while writing to file
+	hasher := sha256.New()
+	teeReader := io.TeeReader(reader, hasher) // Read from input, write to hasher
+
+	// Copy data from input reader to file via TeeReader
+	size, err := io.Copy(outFile, teeReader)
+	if err != nil {
+		// Clean up partially written file on error
+		outFile.Close()
+		os.Remove(artifactPath)
+		return fmt.Errorf("failed to write artifact data: %w", err)
 	}
 
-	// Write artifact to file
-	artifactPath := filepath.Join(modulePath, ArtifactFile)
-	if err := os.WriteFile(artifactPath, artifactData, 0644); err != nil {
-		return fmt.Errorf("failed to write artifact file: %w", err)
-	}
+	// Get the SHA256 digest
+	digest := hex.EncodeToString(hasher.Sum(nil))
 
 	// Create metadata
 	metadata := ArtifactMetadata{
@@ -55,13 +69,20 @@ func (c *Cache) PutArtifact(namespace, name, version string, reader io.Reader) e
 		Name:           name,
 		Version:        version,
 		DownloadedAt:   time.Now(),
-		Size:           int64(len(artifactData)),
+		Size:           size,
 		LastAccessedAt: time.Now(),
 		AccessCount:    0,
-		// TODO: Calculate SHA256 digest
+		Digest:         digest, // Store the calculated digest
 	}
 
 	// Try to extract import path from sproto.yaml in the zip if present
+	// Need to read the artifact data again for this, or pass it along
+	// Let's read the file we just wrote
+	artifactData, err := os.ReadFile(artifactPath)
+	if err != nil {
+		// Log error but continue, metadata will lack import path
+		fmt.Fprintf(os.Stderr, "Warning: failed to re-read artifact for import path extraction: %v\n", err)
+	}
 	importPath, err := extractImportPathFromZip(artifactData)
 	if err == nil && importPath != "" {
 		metadata.ImportPath = importPath

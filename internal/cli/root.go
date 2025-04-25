@@ -52,8 +52,14 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", "info", "Set logging level (debug, info, warn, error)")
 
 	// Add subcommands
-	// TODO: Ensure ConfigureCmd, PublishCmd, FetchCmd, ListCmd are added correctly elsewhere if needed.
-	rootCmd.AddCommand(ValidateConfigCmd(GetLogger())) // Add the new validate command
+	rootCmd.AddCommand(configureCmd)
+	rootCmd.AddCommand(publishCmd)
+	rootCmd.AddCommand(fetchCmd)
+	rootCmd.AddCommand(listCmd)
+	rootCmd.AddCommand(resolveCmd) // Added resolve command
+	rootCmd.AddCommand(compileCmd) // Added compile command
+	rootCmd.AddCommand(cacheCmd)   // Added cache command
+	rootCmd.AddCommand(ValidateConfigCmd(GetLogger()))
 
 	// Bind persistent flags to Viper
 	_ = viper.BindPFlag("registry_url", rootCmd.PersistentFlags().Lookup("registry-url"))

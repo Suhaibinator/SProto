@@ -21,9 +21,11 @@ import (
 	"github.com/Suhaibinator/SProto/internal/config" // Added for sproto.yaml parsing
 	"github.com/Suhaibinator/SProto/internal/db"
 	"github.com/Suhaibinator/SProto/internal/models"
+	"github.com/Suhaibinator/SProto/internal/resolver"
 	"github.com/Suhaibinator/SProto/internal/storage"
 	"github.com/google/uuid" // Added for storeDependencies
 	"github.com/gorilla/mux"
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
 
@@ -797,19 +799,203 @@ func HandleListModuleVersionDependencies(w http.ResponseWriter, r *http.Request)
 	response.JSON(w, http.StatusOK, respData)
 }
 
-// HandleResolveDependencies - Placeholder for dependency resolution logic (Phase 2/3).
-// GET /api/v1/resolve?module={namespace}/{module_name}&version={version} (Example query params)
+// DatabaseRegistryAccessor implements resolver.RegistryAccessor interface for database access.
+type DatabaseRegistryAccessor struct {
+	DB     *gorm.DB
+	Logger *zap.Logger
+}
+
+// GetModuleInfo retrieves module metadata from the database.
+func (a *DatabaseRegistryAccessor) GetModuleInfo(namespace, name string) (*resolver.ModuleInfo, error) {
+	var module models.Module
+	err := a.DB.Where("namespace = ? AND name = ?", namespace, name).First(&module).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("module %s/%s not found", namespace, name)
+		}
+		return nil, fmt.Errorf("database error: %w", err)
+	}
+
+	return &resolver.ModuleInfo{
+		Namespace:  module.Namespace,
+		Name:       module.Name,
+		ImportPath: module.ImportPath,
+	}, nil
+}
+
+// GetModuleVersions retrieves available versions for a module from the database.
+func (a *DatabaseRegistryAccessor) GetModuleVersions(namespace, name string) ([]string, error) {
+	var module models.Module
+	err := a.DB.Where("namespace = ? AND name = ?", namespace, name).First(&module).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("module %s/%s not found", namespace, name)
+		}
+		return nil, fmt.Errorf("database error: %w", err)
+	}
+
+	var versions []string
+	err = a.DB.Model(&models.ModuleVersion{}).
+		Where("module_id = ?", module.ID).
+		Order("created_at DESC").
+		Pluck("version", &versions).Error
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch versions: %w", err)
+	}
+
+	return versions, nil
+}
+
+// GetModuleDependencies retrieves dependencies for a module from the database.
+func (a *DatabaseRegistryAccessor) GetModuleDependencies(namespace, name string) ([]resolver.DependencyInfo, error) {
+	var module models.Module
+	err := a.DB.Where("namespace = ? AND name = ?", namespace, name).First(&module).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("module %s/%s not found", namespace, name)
+		}
+		return nil, fmt.Errorf("database error: %w", err)
+	}
+
+	type DbDependency struct {
+		Namespace         string `gorm:"column:required_namespace"`
+		Name              string `gorm:"column:required_name"`
+		VersionConstraint string `gorm:"column:version_constraint"`
+	}
+
+	var dbDeps []DbDependency
+	err = a.DB.Table("module_dependencies md").
+		Select("rm.namespace as required_namespace, rm.name as required_name, md.version_constraint").
+		Joins("JOIN modules rm ON rm.id = md.required_module_id").
+		Where("md.dependent_module_id = ?", module.ID).
+		Scan(&dbDeps).Error
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch dependencies: %w", err)
+	}
+
+	// Convert to resolver.DependencyInfo
+	deps := make([]resolver.DependencyInfo, len(dbDeps))
+	for i, dep := range dbDeps {
+		deps[i] = resolver.DependencyInfo{
+			Namespace:         dep.Namespace,
+			Name:              dep.Name,
+			VersionConstraint: dep.VersionConstraint,
+		}
+	}
+
+	return deps, nil
+}
+
+// HandleResolveDependencies implements dependency resolution logic.
+// GET /api/v1/resolve?module={namespace}/{module_name}&version={version} (optional version)
 func HandleResolveDependencies(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement dependency resolution logic.
-	// This will involve:
-	// 1. Parsing module/version from query params.
-	// 2. Fetching the root module's dependencies.
-	// 3. Recursively fetching dependencies of dependencies.
-	// 4. Resolving version constraints using semver logic (e.g., finding the highest compatible version).
-	// 5. Detecting and handling conflicts or cycles.
-	// 6. Returning a flattened list of resolved dependencies (specific versions) and their import paths.
-	log.Println("Placeholder: HandleResolveDependencies called")
-	response.Error(w, http.StatusNotImplemented, "Dependency resolution endpoint not yet implemented")
+	// 1. Parse query parameters
+	queryValues := r.URL.Query()
+	moduleParam := queryValues.Get("module")
+	version := queryValues.Get("version")
+
+	if moduleParam == "" {
+		response.Error(w, http.StatusBadRequest, "Missing required 'module' parameter")
+		return
+	}
+
+	// Parse module param as "namespace/name"
+	parts := strings.SplitN(moduleParam, "/", 2)
+	if len(parts) != 2 {
+		response.Error(w, http.StatusBadRequest, "Invalid module format, expected 'namespace/name'")
+		return
+	}
+	namespace, name := parts[0], parts[1]
+
+	// 2. Set up the resolver with database accessor
+	gormDB := db.GetDB()
+	logger := zap.L() // Assuming a global logger is available, adjust as needed
+	dbAccessor := &DatabaseRegistryAccessor{
+		DB:     gormDB,
+		Logger: logger,
+	}
+	depResolver := resolver.NewDependencyResolver(dbAccessor, logger, nil) // No progress bar for API
+
+	// 3. Resolve dependencies
+	resolved, err := depResolver.ResolveRootModule(namespace, name, version)
+	if err != nil {
+		log.Printf("Error resolving dependencies for %s/%s@%s: %v", namespace, name, version, err)
+		response.Error(w, http.StatusInternalServerError, fmt.Sprintf("Failed to resolve dependencies: %v", err))
+		return
+	}
+
+	// 4. Build import paths mapping
+	importPaths := make(map[string]string)
+	for moduleID, resolvedVersion := range resolved {
+		// Extract namespace/name from moduleID
+		idParts := strings.SplitN(moduleID, "/", 2)
+		if len(idParts) != 2 {
+			continue // Skip invalid module IDs
+		}
+		modNamespace, modName := idParts[0], idParts[1]
+
+		// Get module info for import path
+		moduleInfo, err := dbAccessor.GetModuleInfo(modNamespace, modName)
+		if err != nil || moduleInfo.ImportPath == nil {
+			continue // Skip if module info or import path not available
+		}
+
+		// Add mapping from import path to resolved version
+		importPaths[*moduleInfo.ImportPath] = fmt.Sprintf("%s/%s@%s", modNamespace, modName, resolvedVersion)
+	}
+
+	// 5. Build response
+	// Get root module info
+	rootModuleInfo, _ := dbAccessor.GetModuleInfo(namespace, name)
+	rootImportPath := ""
+	if rootModuleInfo != nil && rootModuleInfo.ImportPath != nil {
+		rootImportPath = *rootModuleInfo.ImportPath
+	}
+
+	rootInfo := ModuleVersionInfo{
+		Namespace:  namespace,
+		Name:       name,
+		Version:    resolved[fmt.Sprintf("%s/%s", namespace, name)],
+		ImportPath: rootImportPath,
+	}
+
+	deps := make([]ModuleVersionInfo, 0, len(resolved)-1) // -1 for root
+	for moduleID, resolvedVersion := range resolved {
+		// Skip root module
+		if moduleID == fmt.Sprintf("%s/%s", namespace, name) {
+			continue
+		}
+
+		// Extract namespace/name from moduleID
+		idParts := strings.SplitN(moduleID, "/", 2)
+		if len(idParts) != 2 {
+			continue // Skip invalid module IDs
+		}
+		modNamespace, modName := idParts[0], idParts[1]
+
+		// Get module info for import path
+		moduleInfo, err := dbAccessor.GetModuleInfo(modNamespace, modName)
+		importPath := ""
+		if err == nil && moduleInfo.ImportPath != nil {
+			importPath = *moduleInfo.ImportPath
+		}
+
+		deps = append(deps, ModuleVersionInfo{
+			Namespace:  modNamespace,
+			Name:       modName,
+			Version:    resolvedVersion,
+			ImportPath: importPath,
+		})
+	}
+
+	respData := ResolveDependenciesResponse{
+		Root:                 ModuleVersionInfoType(rootInfo),
+		Dependencies:         convertToModuleVersionInfoType(deps),
+		ImportPaths:          importPaths,
+		ResolvedDependencies: resolved,
+	}
+
+	response.JSON(w, http.StatusOK, respData)
 }
 
 // --- Structs for Dependency Resolution Response (Placeholder) ---

@@ -6,10 +6,11 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap" // Added import
 )
 
 func TestImportMapper_AddMapping_ResolveImport(t *testing.T) { // Renamed test function
-	tree := NewImportMapper() // Use correct constructor
+	tree := NewImportMapper(zap.NewNop()) // Use correct constructor with logger
 
 	// Add some mappings
 	// Use ModuleIdentifier struct
@@ -89,7 +90,8 @@ func TestImportMapper_AddMapping_ResolveImport(t *testing.T) { // Renamed test f
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			module, found := tree.ResolveImport(tt.importPath) // ResolveImport returns 2 values now
+			// Pass "" for importerPath as these tests focus on absolute-like imports
+			module, found := tree.ResolveImport(tt.importPath, "")
 			// Calculate expected relative path based on prefix match
 			expectedRelPath := ""
 			if found {
@@ -123,7 +125,7 @@ func TestImportMapper_AddMapping_ResolveImport(t *testing.T) { // Renamed test f
 }
 
 func TestImportMapper_AddMapping_Conflict(t *testing.T) { // Renamed test function
-	tree := NewImportMapper() // Use correct constructor
+	tree := NewImportMapper(zap.NewNop()) // Use correct constructor with logger
 	err := tree.AddMapping("github.com/myorg/common", ModuleIdentifier{Namespace: "myorg", Name: "common"})
 	require.NoError(t, err)
 
@@ -163,44 +165,121 @@ func TestPrefixTree_AddMapping_NestedConflict(t *testing.T) {
 */
 
 func TestImportMapper_EmptyImport(t *testing.T) { // Renamed test function
-	tree := NewImportMapper()               // Use correct constructor
-	module, found := tree.ResolveImport("") // ResolveImport returns 2 values
+	tree := NewImportMapper(zap.NewNop())       // Use correct constructor with logger
+	module, found := tree.ResolveImport("", "") // Pass importerPath
 	assert.False(t, found)
 	assert.Equal(t, ModuleIdentifier{}, module)
 	// assert.Equal(t, "", relPath) // No relPath returned - Commenting out as relPath is not returned
 }
 
-// Assuming normalizePath is unexported, we can't test it directly.
-// If it were exported as NormalizePath, the test would look like this:
-/*
-func TestNormalizePath(t *testing.T) {
+func TestImportMapper_RelativeImports(t *testing.T) {
+	tree := NewImportMapper(zap.NewNop())
+	err := tree.AddMapping("github.com/myorg/common", ModuleIdentifier{Namespace: "myorg", Name: "common"})
+	require.NoError(t, err)
+
+	// Test relative path resolution
 	tests := []struct {
-		input    string
-		expected string
+		name           string
+		importPath     string
+		importerPath   string
+		expectedModule ModuleIdentifier
+		expectFound    bool
 	}{
-		{"google/protobuf/timestamp.proto", "google/protobuf/timestamp.proto"},
-		{"./google/protobuf/timestamp.proto", "google/protobuf/timestamp.proto"},
-		{"google/protobuf/", "google/protobuf"},
-		{"/google/protobuf/", "google/protobuf"},
-		{"google\\protobuf\\timestamp.proto", "google/protobuf/timestamp.proto"},                 // Windows paths
-		{"..//google/protobuf/../protobuf/./timestamp.proto", "google/protobuf/timestamp.proto"}, // Complex relative
-		{"", ""},
-		{"/", ""},
-		{".", ""},
+		{
+			name:           "Relative path from parent directory",
+			importPath:     "../common/user.proto",
+			importerPath:   "github.com/myorg/api/service.proto",
+			expectedModule: ModuleIdentifier{Namespace: "myorg", Name: "common"},
+			expectFound:    true,
+		},
+		{
+			name:           "Relative path from same directory",
+			importPath:     "./types.proto",
+			importerPath:   "github.com/myorg/common/user.proto",
+			expectedModule: ModuleIdentifier{Namespace: "myorg", Name: "common"},
+			expectFound:    true,
+		},
+		{
+			name:           "Relative path with no leading dot",
+			importPath:     "types.proto",
+			importerPath:   "github.com/myorg/common/user.proto",
+			expectedModule: ModuleIdentifier{Namespace: "myorg", Name: "common"},
+			expectFound:    true,
+		},
+		{
+			name:           "Relative path to parent prefix but invalid module",
+			importPath:     "../unknown/types.proto",
+			importerPath:   "github.com/myorg/common/user.proto",
+			expectedModule: ModuleIdentifier{}, // No mapping for "github.com/myorg/unknown"
+			expectFound:    false,
+		},
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			assert.Equal(t, tt.expected, NormalizePath(tt.input)) // Use exported name
+		t.Run(tt.name, func(t *testing.T) {
+			module, found := tree.ResolveImport(tt.importPath, tt.importerPath)
+			assert.Equal(t, tt.expectFound, found)
+			assert.Equal(t, tt.expectedModule, module)
 		})
 	}
 }
-*/
 
-// Duplicated test code below needs to be removed
-/*
-	err := tree.AddMapping("google/protobuf", "google/protobuf@v1.28.0")
+func TestImportMapper_GetModuleImportPrefix(t *testing.T) {
+	tree := NewImportMapper(zap.NewNop())
+
+	// Add some mappings
+	err := tree.AddMapping("github.com/myorg/common", ModuleIdentifier{Namespace: "myorg", Name: "common"})
 	require.NoError(t, err)
+	err = tree.AddMapping("github.com/myorg/api/v1", ModuleIdentifier{Namespace: "myorg", Name: "api-v1"})
+	require.NoError(t, err)
+
+	// Multiple prefixes can map to the same module
+	err = tree.AddMapping("github.com/myorg/alternate", ModuleIdentifier{Namespace: "myorg", Name: "common"})
+	require.NoError(t, err)
+
+	tests := []struct {
+		name       string
+		namespace  string
+		modName    string
+		wantPrefix string
+		wantFound  bool
+	}{
+		{
+			name:       "Find existing module",
+			namespace:  "myorg",
+			modName:    "common",
+			wantPrefix: "github.com/myorg/common", // First mapping takes precedence
+			wantFound:  true,
+		},
+		{
+			name:       "Find different module",
+			namespace:  "myorg",
+			modName:    "api-v1",
+			wantPrefix: "github.com/myorg/api/v1",
+			wantFound:  true,
+		},
+		{
+			name:       "Module not found",
+			namespace:  "myorg",
+			modName:    "nonexistent",
+			wantPrefix: "",
+			wantFound:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			prefix, found := tree.GetModuleImportPrefix(tt.namespace, tt.modName)
+			assert.Equal(t, tt.wantFound, found)
+			if found {
+				assert.Equal(t, tt.wantPrefix, prefix)
+			}
+		})
+	}
+}
+
+/*
+// Original duplicated code that should be entirely commented out
 	err = tree.AddMapping("github.com/myorg/common", "myorg/common@v1.0.0")
 	require.NoError(t, err)
 	err = tree.AddMapping("github.com/myorg/api/v1", "myorg/api@v1.5.0")

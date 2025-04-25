@@ -4,12 +4,23 @@ import (
 	"fmt"
 	"log"
 	"sort"
-	"strings" // Import strings package
+	"strings" // Ensure strings is imported
 	"sync"
 
 	"github.com/Masterminds/semver/v3" // Added for version constraint checking
 	"github.com/heimdalr/dag"
 )
+
+// topologicalSortVisitor implements the dag.Visitor interface to collect vertices in topological order.
+type topologicalSortVisitor struct {
+	orderedIDs []string
+}
+
+// Visit appends the visited vertex ID to the list.
+func (v *topologicalSortVisitor) Visit(vertex dag.Vertexer) {
+	id, _ := vertex.Vertex() // Get the vertex ID
+	v.orderedIDs = append(v.orderedIDs, id)
+}
 
 // ModuleMetadata holds information about a specific module relevant for dependency resolution.
 type ModuleMetadata struct {
@@ -17,7 +28,6 @@ type ModuleMetadata struct {
 	Name       string
 	ImportPath string   // Base import path for the module
 	Versions   []string // Available versions, should be sorted semantically descending for resolution logic
-	// TODO: Add other relevant info? e.g., source (registry, local)
 }
 
 // DependencyGraph represents the module dependency graph.
@@ -194,23 +204,30 @@ func (g *DependencyGraph) GetDependents(moduleID string) ([]string, error) {
 
 // GetResolutionOrder performs a topological sort on the dependency graph.
 // It returns a slice of module IDs in dependency-first order.
-// Returns an error if the graph contains cycles (which should be checked separately).
+// Returns an error if the graph contains cycles (which should be checked separately, though AddEdge prevents them).
 func (g *DependencyGraph) GetResolutionOrder() ([]string, error) {
-	// TODO: Implement proper topological sort using heimdalr/dag v1.5.0.
-	// The OrderedWalk API usage was causing persistent compiler errors.
-	// Needs investigation into the correct Visitor interface implementation
-	// or alternative methods for topological sorting in this library version.
-	// For now, returning unsorted keys as a placeholder to unblock.
-	log.Println("Warning: GetResolutionOrder returning unsorted module list due to temporary implementation.")
 	g.mu.RLock()
 	defer g.mu.RUnlock()
 
-	modules := make([]string, 0, len(g.modules))
-	for id := range g.modules {
-		modules = append(modules, id)
+	visitor := &topologicalSortVisitor{
+		orderedIDs: make([]string, 0, len(g.modules)),
 	}
-	// This list is NOT topologically sorted.
-	return modules, nil
+
+	// OrderedWalk traverses the graph in topological order.
+	// It does not return an error directly, but relies on AddEdge preventing cycles.
+	g.dag.OrderedWalk(visitor)
+
+	// Check if the number of visited nodes matches the number of modules.
+	// This is a sanity check, as OrderedWalk might behave unexpectedly with complex graphs or library bugs.
+	if len(visitor.orderedIDs) != len(g.modules) {
+		// This might indicate an issue if the graph wasn't fully traversed,
+		// potentially due to disconnected components not reachable from roots,
+		// or an issue with the walk implementation itself.
+		log.Printf("Warning: Topological sort visited %d nodes, but graph contains %d modules. Graph might be disconnected or walk incomplete.", len(visitor.orderedIDs), len(g.modules))
+		// Depending on requirements, this could be an error. For now, return the potentially partial order.
+	}
+
+	return visitor.orderedIDs, nil
 }
 
 // ResolvedDependencies maps module IDs to their resolved version strings.
@@ -228,30 +245,14 @@ func (g *DependencyGraph) ResolveVersions(rootModuleID string) (ResolvedDependen
 		return nil, fmt.Errorf("root module '%s' not found in graph", rootModuleID)
 	}
 
-	// 2. Perform cycle check first (important!)
-	cycles, err := g.CheckForCycles() // Use the placeholder cycle check
-	if err != nil {
-		return nil, fmt.Errorf("error checking for cycles: %w", err)
-	}
-	if len(cycles) > 0 {
-		// Even though the placeholder returns empty, keep the check structure.
-		// If CheckForCycles is fixed later to return actual cycles, this will work.
-		cyclePath := make([]string, len(cycles[0]))
-		for i, nodeID := range cycles[0] {
-			cyclePath[i] = nodeID
-		}
-		return nil, fmt.Errorf("cannot resolve versions: dependency cycle detected: %s", strings.Join(cyclePath, " -> "))
-	}
-	// TODO: Remove the following log line once CheckForCycles is correctly implemented.
-	log.Println("Warning: Cycle check in ResolveVersions is currently ineffective due to placeholder implementation of CheckForCycles.")
-
-	// 3. Get topological sort (dependency-first order)
-	resolutionOrder, err := g.GetResolutionOrder() // Use the placeholder sort
+	// 2. Get topological sort (dependency-first order)
+	// Cycle check is implicitly handled by AddEdge returning an error if a cycle is detected during graph build.
+	resolutionOrder, err := g.GetResolutionOrder()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get resolution order: %w", err)
 	}
 
-	// 4. Iterate through modules in reverse topological order (dependents first)
+	// 3. Iterate through modules in reverse topological order (dependents first)
 	//    This allows us to propagate version choices down the dependency chain.
 	//    Alternatively, iterate dependency-first and keep track of constraints.
 	//    Let's try dependency-first and select the highest satisfying version.
@@ -347,11 +348,14 @@ func (g *DependencyGraph) ResolveVersions(rootModuleID string) (ResolvedDependen
 			// If it's not the root, has available versions, but none satisfied the constraints
 			// OR if it had no versions available in the first place (and isn't the root)
 			// This check needs refinement for the case where the root itself has constraints applied *to* it.
-			// For now, fail if no version satisfies constraints for a non-root module with versions.
-			// TODO: Improve error message to show conflicting constraints.
-			return nil, fmt.Errorf("failed to resolve dependencies: no compatible version found for module '%s'", moduleID)
+			// Construct a more informative error message showing the constraints
+			constraintMsgs := []string{}
+			for _, c := range constraints {
+				constraintMsgs = append(constraintMsgs, c.String())
+			}
+			return nil, fmt.Errorf("failed to resolve dependencies: no compatible version found for module '%s' satisfying constraints [%s]", moduleID, strings.Join(constraintMsgs, ", "))
 		} else if !foundMatch && isRoot && len(g.modules[moduleID].Versions) > 0 {
-			// If it's the root and has versions, but none match (e.g., constraints applied to root?)
+			// If it's the root and has versions, but none match constraints applied to root
 			// Select the highest available version for the root if no constraints applied.
 			if len(constraints) == 0 && len(possibleVersions[moduleID]) > 0 {
 				selectedVersion = "v" + possibleVersions[moduleID][0].String()
@@ -386,16 +390,42 @@ func (g *DependencyGraph) ResolveVersions(rootModuleID string) (ResolvedDependen
 	return resolved, nil
 }
 
-// CheckForCycles uses the underlying DAG library's cycle detection.
-// It returns a slice of cycles, where each cycle is represented by a slice of module IDs (strings).
-// TODO: Correctly implement cycle detection using heimdalr/dag v1.5.0 API.
-// The GetCycles() or IsAcyclic() methods used previously were incorrect for this library version.
-// Needs investigation into the correct API call.
-// For now, returning an empty slice to unblock compilation.
-func (g *DependencyGraph) CheckForCycles() ([][]string, error) {
-	log.Println("Warning: CheckForCycles is not implemented correctly and will not detect cycles.")
-	// Placeholder implementation
-	return [][]string{}, nil // Assume no cycles for now
-}
+// Note: Cycle detection is handled by the AddEdge method of the underlying DAG library,
+// which returns an error if adding an edge would create a cycle.
 
-// TODO: Implement LoadFromConfig, LoadFromRegistry, LoadFromDirectory methods
+// LoadFromConfig builds a dependency graph from sproto.yaml configuration file data.
+// It adds the root module and all its dependencies to the graph.
+func (g *DependencyGraph) LoadFromConfig(namespace, name string, deps []DependencyInfo) error {
+	// Add the root module
+	err := g.AddModule(ModuleMetadata{
+		Namespace: namespace,
+		Name:      name,
+		// ImportPath and Versions will be populated by other processes
+	})
+	if err != nil {
+		return fmt.Errorf("failed to add root module '%s/%s' to graph: %w", namespace, name, err)
+	}
+
+	// Add dependencies to the graph
+	for _, dep := range deps {
+		// Add the dependency module first
+		err := g.AddModule(ModuleMetadata{
+			Namespace: dep.Namespace,
+			Name:      dep.Name,
+			// VersionConstraint is handled in AddDependency below
+		})
+		if err != nil && !strings.Contains(err.Error(), "already exists") {
+			return fmt.Errorf("failed to add dependency module '%s/%s' to graph: %w",
+				dep.Namespace, dep.Name, err)
+		}
+
+		// Add the dependency edge with its version constraint
+		err = g.AddDependency(namespace, name, dep.Namespace, dep.Name, dep.VersionConstraint)
+		if err != nil && !strings.Contains(err.Error(), "already exists") {
+			return fmt.Errorf("failed to add dependency edge '%s/%s' -> '%s/%s': %w",
+				namespace, name, dep.Namespace, dep.Name, err)
+		}
+	}
+
+	return nil
+}

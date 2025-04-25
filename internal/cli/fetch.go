@@ -23,8 +23,9 @@ import (
 )
 
 var (
-	fetchOutputDir string
-	fetchWithDeps  bool // Flag to fetch dependencies
+	fetchOutputDir  string
+	fetchWithDeps   bool // Flag to fetch dependencies
+	fetchUpdateFlag bool // Flag to update cached artifact
 )
 
 // fetchCmd represents the fetch command
@@ -114,8 +115,8 @@ Examples:
 			log.Fatal("Error checking cache for artifact", zap.Error(err))
 		}
 
-		// TODO: Add --update flag handling for fetch command
-		fetchUpdateFlag := false // Placeholder for fetch --update flag
+		// Remove placeholder; use fetchUpdateFlag from global flag
+		// fetchUpdateFlag := false // Removed placeholder
 
 		if !exists || fetchUpdateFlag {
 			if exists && fetchUpdateFlag {
@@ -338,5 +339,6 @@ func init() {
 
 	// Optional flag to fetch dependencies
 	fetchCmd.Flags().BoolVar(&fetchWithDeps, "with-deps", false, "Resolve and fetch all dependencies into the local cache")
-	// TODO: Add --update flag specific to fetch command
+	// Flag to update cached artifact even if exists
+	fetchCmd.Flags().BoolVar(&fetchUpdateFlag, "update", false, "Update artifact in cache even if already present")
 }

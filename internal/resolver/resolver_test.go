@@ -4,61 +4,71 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/Suhaibinator/SProto/internal/api"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 )
 
-// MockRegistryClient provides a mock implementation of the client interface.
+// MockRegistryClient provides a mock implementation of the RegistryAccessor interface.
 type MockRegistryClient struct {
-	Modules      map[string]*api.ModuleInfo
-	Versions     map[string][]string
-	Dependencies map[string][]api.DependencyResponse
+	// Store data using the types defined in the resolver package
+	ModuleInfoData   map[string]*ModuleInfo
+	VersionsData     map[string][]string
+	DependenciesData map[string][]DependencyInfo // Use DependencyInfo
 }
 
-func (m *MockRegistryClient) FetchModuleMetadata(namespace, name string) (*api.ModuleInfo, error) {
+// GetModuleInfo mocks the RegistryAccessor method.
+func (m *MockRegistryClient) GetModuleInfo(namespace, name string) (*ModuleInfo, error) {
 	id := fmt.Sprintf("%s/%s", namespace, name)
-	if info, ok := m.Modules[id]; ok {
+	if info, ok := m.ModuleInfoData[id]; ok {
 		return info, nil
 	}
 	return nil, fmt.Errorf("module not found: %s", id)
 }
 
-func (m *MockRegistryClient) FetchModuleVersions(namespace, name string) ([]string, error) {
+// GetModuleVersions mocks the RegistryAccessor method.
+func (m *MockRegistryClient) GetModuleVersions(namespace, name string) ([]string, error) {
 	id := fmt.Sprintf("%s/%s", namespace, name)
-	if versions, ok := m.Versions[id]; ok {
-		return versions, nil
+	if versions, ok := m.VersionsData[id]; ok {
+		// Return a copy to prevent modification
+		vCopy := make([]string, len(versions))
+		copy(vCopy, versions)
+		return vCopy, nil
 	}
 	return nil, fmt.Errorf("versions not found for module: %s", id)
 }
 
-func (m *MockRegistryClient) FetchModuleDependencies(namespace, name string) ([]api.DependencyResponse, error) {
+// GetModuleDependencies mocks the RegistryAccessor method.
+func (m *MockRegistryClient) GetModuleDependencies(namespace, name string) ([]DependencyInfo, error) {
 	id := fmt.Sprintf("%s/%s", namespace, name)
-	if deps, ok := m.Dependencies[id]; ok {
-		return deps, nil
+	if deps, ok := m.DependenciesData[id]; ok {
+		// Return a copy
+		dCopy := make([]DependencyInfo, len(deps))
+		copy(dCopy, deps)
+		return dCopy, nil
 	}
 	// Return empty slice if no dependencies defined, not an error
-	return []api.DependencyResponse{}, nil
+	return []DependencyInfo{}, nil
 }
 
+// setupMockClient initializes the mock client with test data.
 func setupMockClient() *MockRegistryClient {
 	return &MockRegistryClient{
-		Modules: map[string]*api.ModuleInfo{
+		ModuleInfoData: map[string]*ModuleInfo{
 			"myorg/app":    {Namespace: "myorg", Name: "app", ImportPath: strPtr("github.com/myorg/app")},
 			"myorg/libA":   {Namespace: "myorg", Name: "libA", ImportPath: strPtr("github.com/myorg/libA")},
 			"myorg/libB":   {Namespace: "myorg", Name: "libB", ImportPath: strPtr("github.com/myorg/libB")},
 			"myorg/common": {Namespace: "myorg", Name: "common", ImportPath: strPtr("github.com/myorg/common")},
 			"ext/utils":    {Namespace: "ext", Name: "utils", ImportPath: strPtr("thirdparty.com/utils")},
 		},
-		Versions: map[string][]string{
+		VersionsData: map[string][]string{
 			"myorg/app":    {"v1.0.0", "v1.1.0"},
 			"myorg/libA":   {"v1.0.0", "v1.0.1", "v1.1.0"},
 			"myorg/libB":   {"v0.9.0", "v1.0.0"},
 			"myorg/common": {"v1.0.0", "v1.1.0", "v2.0.0"},
 			"ext/utils":    {"v1.0.0"},
 		},
-		Dependencies: map[string][]api.DependencyResponse{
+		DependenciesData: map[string][]DependencyInfo{ // Use DependencyInfo
 			"myorg/app": {
 				{Namespace: "myorg", Name: "libA", VersionConstraint: "^v1.0.0"}, // >=v1.0.0 <v2.0.0
 				{Namespace: "myorg", Name: "libB", VersionConstraint: "v1.0.0"},
@@ -75,6 +85,7 @@ func setupMockClient() *MockRegistryClient {
 	}
 }
 
+// Helper function to create string pointers for ModuleInfo
 func strPtr(s string) *string { return &s }
 
 func TestDependencyResolver_ResolveRootModule_Simple(t *testing.T) {
@@ -116,7 +127,7 @@ func TestDependencyResolver_ResolveRootModule_Diamond(t *testing.T) {
 func TestDependencyResolver_ResolveRootModule_Conflict(t *testing.T) {
 	client := setupMockClient()
 	// Modify libA dependency to cause conflict
-	client.Dependencies["myorg/libA"] = []api.DependencyResponse{
+	client.DependenciesData["myorg/libA"] = []DependencyInfo{ // Use DependencyInfo
 		{Namespace: "myorg", Name: "common", VersionConstraint: "v1.0.0"}, // Exact v1.0.0
 	}
 	// libB still depends on common >=v1.1.0 <v2.0.0
@@ -144,8 +155,8 @@ func TestDependencyResolver_ResolveRootModule_ModuleNotFound(t *testing.T) {
 func TestDependencyResolver_ResolveRootModule_DependencyNotFound(t *testing.T) {
 	client := setupMockClient()
 	// Add dependency on a module that doesn't exist in the mock client
-	client.Dependencies["myorg/app"] = append(client.Dependencies["myorg/app"],
-		api.DependencyResponse{Namespace: "myorg", Name: "nonexistent", VersionConstraint: "v1.0.0"},
+	client.DependenciesData["myorg/app"] = append(client.DependenciesData["myorg/app"], // Use DependencyInfo
+		DependencyInfo{Namespace: "myorg", Name: "nonexistent", VersionConstraint: "v1.0.0"},
 	)
 
 	logger := zap.NewNop()
@@ -161,10 +172,10 @@ func TestDependencyResolver_ResolveRootModule_DependencyNotFound(t *testing.T) {
 func TestDependencyResolver_ResolveRootModule_Cycle(t *testing.T) {
 	client := setupMockClient()
 	// Create a cycle: libA -> libB -> libA
-	client.Dependencies["myorg/libA"] = []api.DependencyResponse{
+	client.DependenciesData["myorg/libA"] = []DependencyInfo{ // Use DependencyInfo
 		{Namespace: "myorg", Name: "libB", VersionConstraint: "v1.0.0"},
 	}
-	client.Dependencies["myorg/libB"] = []api.DependencyResponse{
+	client.DependenciesData["myorg/libB"] = []DependencyInfo{ // Use DependencyInfo
 		{Namespace: "myorg", Name: "libA", VersionConstraint: "v1.0.0"},
 	}
 

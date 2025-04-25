@@ -4,24 +4,69 @@ import (
 	"fmt"
 	"strings" // Ensure strings is imported
 
-	"github.com/Suhaibinator/SProto/internal/api"
-	"github.com/vbauerster/mpb/v8" // Import mpb
+	// "github.com/Suhaibinator/SProto/internal/api" // Avoid direct dependency on api package types if possible
+	"sort" // Added import
+
+	"github.com/Masterminds/semver/v3" // Added import
+	"github.com/vbauerster/mpb/v8"     // Import mpb
 	"go.uber.org/zap"
 )
+
+// --- Helper Functions ---
+
+// sortVersionsDesc sorts a slice of version strings semantically descending.
+func sortVersionsDesc(versions []string) {
+	semvers := make([]*semver.Version, 0, len(versions))
+	for _, vStr := range versions {
+		v, err := semver.NewVersion(vStr)
+		if err == nil {
+			semvers = append(semvers, v)
+		} else {
+			// Log or handle parse error? For now, just skip unparseable versions.
+		}
+	}
+	sort.Sort(sort.Reverse(semver.Collection(semvers)))
+	// Overwrite the original slice with sorted versions, ensuring 'v' prefix
+	for i, v := range semvers {
+		versions[i] = "v" + v.String()
+	}
+}
+
+// --- Interfaces for Data Access ---
+
+// ModuleInfo holds basic module metadata needed by the resolver.
+// Define locally to avoid direct dependency on api package struct if it changes.
+type ModuleInfo struct {
+	Namespace  string
+	Name       string
+	ImportPath *string
+}
+
+// DependencyInfo holds dependency details needed by the resolver.
+type DependencyInfo struct {
+	Namespace         string
+	Name              string
+	VersionConstraint string
+}
+
+// RegistryAccessor defines the interface required by the resolver to fetch data.
+// This allows decoupling from the specific client/database implementation.
+type RegistryAccessor interface {
+	GetModuleInfo(namespace, name string) (*ModuleInfo, error)
+	GetModuleVersions(namespace, name string) ([]string, error)
+	GetModuleDependencies(namespace, name string) ([]DependencyInfo, error)
+}
+
+// --- Resolver Implementation ---
 
 // generateModuleID generates a unique string identifier for a module.
 func generateModuleID(namespace, name string) string {
 	return fmt.Sprintf("%s/%s", namespace, name)
 }
 
-// DependencyResolver is responsible for resolving module dependencies
-// and coordinating with the registry client to fetch information.
+// DependencyResolver is responsible for resolving module dependencies.
 type DependencyResolver struct {
-	client interface { // Define an interface for required client methods
-		FetchModuleMetadata(namespace, name string) (*api.ModuleInfo, error)
-		FetchModuleVersions(namespace, name string) ([]string, error)
-		FetchModuleDependencies(namespace, name string) ([]api.DependencyResponse, error) // Added method
-	}
+	accessor RegistryAccessor // Use the defined interface
 	logger   *zap.Logger
 	graph    *DependencyGraph
 	visited  map[string]bool // Track visited modules during graph build
@@ -29,15 +74,9 @@ type DependencyResolver struct {
 }
 
 // NewDependencyResolver creates a new instance of the DependencyResolver.
-func NewDependencyResolver(client interface { // Use the defined interface
-	FetchModuleMetadata(namespace, name string) (*api.ModuleInfo, error)
-	FetchModuleVersions(namespace, name string) ([]string, error)
-	FetchModuleDependencies(namespace, name string) ([]api.DependencyResponse, error)
-},
-	logger *zap.Logger, progress *mpb.Progress) *DependencyResolver { // Add progress parameter
-
+func NewDependencyResolver(accessor RegistryAccessor, logger *zap.Logger, progress *mpb.Progress) *DependencyResolver {
 	return &DependencyResolver{
-		client:   client,
+		accessor: accessor,
 		logger:   logger,
 		graph:    NewDependencyGraph(),
 		visited:  make(map[string]bool),
@@ -86,10 +125,15 @@ func (r *DependencyResolver) buildGraphRecursive(namespace, name string) error {
 	r.visited[moduleID] = true
 	r.logger.Debug("Building graph node", zap.String("module_id", moduleID))
 
-	// 1. Fetch module metadata (including import path)
-	metaInfo, err := r.client.FetchModuleMetadata(namespace, name)
+	// 1. Fetch module metadata (including import path) via accessor
+	metaInfo, err := r.accessor.GetModuleInfo(namespace, name)
 	if err != nil {
-		// If module not found, it's an error in resolution context
+		// Check specific error types or inspect error message to differentiate
+		if strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "no rows") {
+			// Module not found in registry
+			return fmt.Errorf("module '%s' not found in registry: %w", moduleID, err)
+		}
+		// Other errors (connectivity, permission, etc.)
 		return fmt.Errorf("failed to fetch metadata for module '%s': %w", moduleID, err)
 	}
 	importPath := ""
@@ -97,18 +141,21 @@ func (r *DependencyResolver) buildGraphRecursive(namespace, name string) error {
 		importPath = *metaInfo.ImportPath
 	}
 
-	// 2. Fetch available versions
-	versions, err := r.client.FetchModuleVersions(namespace, name)
+	// 2. Fetch available versions via accessor
+	versions, err := r.accessor.GetModuleVersions(namespace, name)
 	if err != nil {
 		return fmt.Errorf("failed to fetch versions for module '%s': %w", moduleID, err)
 	}
+
+	// Sort versions descending semantically for resolver logic
+	sortVersionsDesc(versions) // Use the helper function defined above
 
 	// 3. Add module to graph (if not already added implicitly by AddDependency)
 	moduleMeta := ModuleMetadata{
 		Namespace:  namespace,
 		Name:       name,
 		ImportPath: importPath,
-		Versions:   versions,
+		Versions:   versions, // Use sorted versions
 	}
 	// Use AddModule to ensure metadata is stored, ignore "already exists" error from DAG vertex add.
 	err = r.graph.AddModule(moduleMeta)
@@ -116,10 +163,11 @@ func (r *DependencyResolver) buildGraphRecursive(namespace, name string) error {
 		return fmt.Errorf("failed to add module '%s' to graph: %w", moduleID, err)
 	}
 
-	// 4. Fetch dependencies for this module
-	dependencies, err := r.client.FetchModuleDependencies(namespace, name)
+	// 4. Fetch dependencies for this module via accessor
+	dependencies, err := r.accessor.GetModuleDependencies(namespace, name)
 	if err != nil {
 		// Treat failure to fetch dependencies as potentially non-fatal? Or fail?
+		// Let's fail for now, as it indicates an incomplete graph.
 		// Let's fail for now, as it indicates an incomplete graph.
 		return fmt.Errorf("failed to fetch dependencies for module '%s': %w", moduleID, err)
 	}

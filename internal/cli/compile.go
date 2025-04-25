@@ -101,8 +101,8 @@ Examples:
 			// 	projectProtoDir = cfg.SourceDir
 			// }
 		} else if os.IsNotExist(err) {
-			log.Fatal("sproto.yaml not found. Compile command requires sproto.yaml to determine the module.")
-			// TODO: Potentially allow specifying module via args/flags if sproto.yaml is absent?
+			// If sproto.yaml is not found, we cannot proceed as we need it for module context.
+			log.Fatal("sproto.yaml not found in the current directory. The 'compile' command requires sproto.yaml to determine the module context and dependencies.")
 		} else {
 			log.Fatal("Error accessing sproto.yaml", zap.String("path", configFilePath), zap.Error(err))
 		}

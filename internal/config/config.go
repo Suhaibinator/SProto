@@ -198,10 +198,9 @@ func (c *SProtoConfig) Validate() error {
 			errs = append(errs, fmt.Sprintf("duplicate dependency detected: '%s'", depIdentifier))
 		}
 		depNames[depIdentifier] = struct{}{}
-
-		// TODO: Add circular dependency check (requires dependency graph analysis, potentially outside basic validation)
 	}
 
+	// Note: Circular dependency checks are handled implicitly by the DAG library when adding edges.
 	if len(errs) > 0 {
 		return errors.New("validation failed:\n - " + strings.Join(errs, "\n - "))
 	}

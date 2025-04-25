@@ -2,12 +2,22 @@ package mapper
 
 import (
 	"fmt"
+	"path"
 	"sort"
 	"strings"
 
 	"github.com/Suhaibinator/SProto/internal/api" // Import api package
 	"github.com/Suhaibinator/SProto/internal/config"
+	"go.uber.org/zap" // Added for logging
 )
+
+// WellKnownMappings defines standard import path prefixes and their assumed module identifiers.
+// Adjust these as needed based on how standard protos are stored in your registry.
+var WellKnownMappings = map[string]ModuleIdentifier{
+	"google/protobuf": {Namespace: "google", Name: "protobuf"},
+	// Add other well-known prefixes if necessary (e.g., googleapis)
+	// "google/api":      {Namespace: "google", Name: "api"},
+}
 
 // ModuleIdentifier identifies a module by namespace and name.
 type ModuleIdentifier struct {
@@ -19,13 +29,35 @@ type ModuleIdentifier struct {
 type ImportMapper struct {
 	mappings map[string]ModuleIdentifier
 	prefixes []string // sorted by length for longest-prefix matching
+	logger   *zap.Logger
 }
 
-// NewImportMapper creates a new empty mapper.
-func NewImportMapper() *ImportMapper {
-	return &ImportMapper{
+// NewImportMapper creates a new empty mapper and adds well-known mappings.
+func NewImportMapper(logger *zap.Logger) *ImportMapper {
+	mapper := &ImportMapper{
 		mappings: make(map[string]ModuleIdentifier),
 		prefixes: []string{},
+		logger:   logger.Named("import_mapper"), // Create a named logger
+	}
+	mapper.addWellKnownMappings()
+	return mapper
+}
+
+// addWellKnownMappings pre-populates the mapper with standard mappings.
+func (m *ImportMapper) addWellKnownMappings() {
+	for prefix, moduleID := range WellKnownMappings {
+		err := m.AddMapping(prefix, moduleID)
+		if err != nil {
+			// Log error but don't fail initialization; allows overriding well-known paths if needed.
+			m.logger.Warn("Failed to add well-known mapping (potential override)",
+				zap.String("prefix", prefix),
+				zap.String("module", fmt.Sprintf("%s/%s", moduleID.Namespace, moduleID.Name)),
+				zap.Error(err))
+		} else {
+			m.logger.Debug("Added well-known mapping",
+				zap.String("prefix", prefix),
+				zap.String("module", fmt.Sprintf("%s/%s", moduleID.Namespace, moduleID.Name)))
+		}
 	}
 }
 
@@ -74,11 +106,52 @@ func (m *ImportMapper) LoadMappingsFromConfig(cfg *config.SProtoConfig) error {
 	return nil
 }
 
+// isLikelyRelative determines if an import path is relative.
+// A path is considered relative if it starts with '.' or '..' or doesn't contain a '/'.
+func isLikelyRelative(importPath string) bool {
+	return strings.HasPrefix(importPath, ".") || strings.HasPrefix(importPath, "..") || !strings.Contains(importPath, "/")
+}
+
 // ResolveImport finds the module corresponding to a given import path.
+// It handles both absolute paths (e.g., github.com/...) and relative paths
+// based on the context of the importing file's path.
 // Returns the module identifier and true if found, false otherwise.
-func (m *ImportMapper) ResolveImport(importPath string) (ModuleIdentifier, bool) {
+func (m *ImportMapper) ResolveImport(importPath string, importerPath string) (ModuleIdentifier, bool) {
+	if importPath == "" {
+		return ModuleIdentifier{}, false
+	}
+
+	resolvedPath := importPath // Start with the original path
+	isRelative := isLikelyRelative(importPath)
+
+	if isRelative && importerPath != "" {
+		// It's relative, resolve it based on the importer's path directory
+		importerDir := path.Dir(importerPath)
+		joinedPath := path.Join(importerDir, importPath)
+		resolvedPath = path.Clean(joinedPath) // Clean the path (removes .., .)
+		m.logger.Debug("Resolved relative import",
+			zap.String("original_import", importPath),
+			zap.String("importer_path", importerPath),
+			zap.String("resolved_path", resolvedPath))
+	} else {
+		// Assume absolute-like, clean it just in case
+		resolvedPath = path.Clean(importPath)
+	}
+
+	// Now perform longest-prefix matching on the resolved path
 	for _, prefix := range m.prefixes {
-		if strings.HasPrefix(importPath, prefix) {
+		// For prefix matching to work properly:
+		// 1. The resolvedPath must have content after the prefix (hence the prefix + "/" check)
+		// 2. If the resolvedPath exactly equals the prefix, it's not a valid import (no file specified)
+		if resolvedPath == prefix {
+			// Not a valid import path - needs to include a file
+			continue
+		}
+		if strings.HasPrefix(resolvedPath, prefix+"/") {
+			m.logger.Debug("Resolved import path to module",
+				zap.String("resolved_path", resolvedPath),
+				zap.String("matched_prefix", prefix),
+				zap.Any("module", m.mappings[prefix]))
 			return m.mappings[prefix], true
 		}
 	}
@@ -89,7 +162,6 @@ func (m *ImportMapper) ResolveImport(importPath string) (ModuleIdentifier, bool)
 // This helps decouple the mapper from the specific CLI client implementation.
 type RegistryClient interface {
 	FetchAllModules() ([]api.ModuleInfo, error)
-	// TODO: Add other methods if needed, e.g., FetchModuleVersions, FetchModuleDependencies
 }
 
 // LoadMappingsFromRegistry loads mappings by querying the registry API.
@@ -118,8 +190,17 @@ func (m *ImportMapper) LoadMappingsFromRegistry(client RegistryClient) error {
 	return nil
 }
 
-// TODO: Add tests for LoadMappingsFromRegistry (Task 2.3.3)
-// TODO: Add tests for ResolveImport edge cases (Task 2.3.2)
-// TODO: Implement logic to handle well-known import paths (Task 2.3.1)
-// TODO: Implement logic to resolve relative import paths (Task 2.3.2)
-// TODO: Implement bidirectional mapping (Task 2.1.2 details, but fits here)
+// GetModuleImportPrefix returns the import path prefix for a given module ID.
+// This provides bidirectional mapping capability.
+// Returns the import path prefix and true if found, false otherwise.
+func (m *ImportMapper) GetModuleImportPrefix(namespace, name string) (string, bool) {
+	target := ModuleIdentifier{Namespace: namespace, Name: name}
+
+	for prefix, module := range m.mappings {
+		if module == target {
+			return prefix, true
+		}
+	}
+
+	return "", false
+}
