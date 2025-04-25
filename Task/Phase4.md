@@ -3,7 +3,7 @@
 #### Task 4.1: Implement Cache Management
 - **4.1.1**: Design cache directory structure
   - **Assignee**: Cline
-  - **Status**: TODO
+  - **Status**: DONE
   - **Details**: 
     - Define a standard cache location, typically `~/.cache/sproto` (use `os.UserCacheDir()` for cross-platform compatibility).
     - Structure the cache to store downloaded module artifacts (zips) and potentially extracted files.
@@ -26,7 +26,7 @@
 
 - **4.1.2**: Implement cache operations (get, put, invalidate)
   - **Assignee**: Cline
-  - **Status**: TODO
+  - **Status**: DONE
   - **Details**: 
     - Create a new package `internal/cache`.
     - Implement core cache functions:
@@ -62,7 +62,7 @@
 
 - **4.1.3**: Add cache status reporting
   - **Assignee**: Cline
-  - **Status**: TODO
+  - **Status**: DONE
   - **Details**: 
     - Create a new CLI command `sproto cache <subcommand>`.
     - Implement subcommands:
@@ -77,7 +77,7 @@
 #### Task 4.2: Implement Import Path Directory Structure
 - **4.2.1**: Create directory structure generator
   - **Assignee**: Cline
-  - **Status**: TODO
+  - **Status**: DONE
   - **Details**: 
     - Implement logic within the `internal/cache` or a dedicated `internal/layout` package.
     - Create a function that takes a module's base `import_path` (e.g., "github.com/myorg/common") and a relative file path within the module (e.g., "types/money.proto") and generates the corresponding full path within the cache's `extracted` directory (e.g., `~/.cache/sproto/modules/myorg/common/v1.0.0/extracted/github.com/myorg/common/types/money.proto`).
@@ -86,7 +86,7 @@
 
 - **4.2.2**: Implement file extraction preserving paths
   - **Assignee**: Cline
-  - **Status**: TODO
+  - **Status**: DONE
   - **Details**: 
     - Enhance the `ExtractArtifact` function in `internal/cache`.
     - When extracting the `artifact.zip`:
@@ -111,7 +111,7 @@
 #### Task 4.3: Create Protoc Helper
 - **4.3.1**: Implement proto_path generator
   - **Assignee**: Cline
-  - **Status**: TODO
+  - **Status**: DONE
   - **Details**: 
     - Create a function or method, likely within the `internal/resolver` or a new `internal/compiler` package.
     - Input: A resolved dependency graph (map of module IDs to resolved versions).
@@ -130,7 +130,7 @@
 
 - **4.3.2**: Add protoc command wrapper
   - **Assignee**: Cline
-  - **Status**: TODO
+  - **Status**: DONE
   - **Details**: 
     - Create a new CLI command, e.g., `sproto compile` or `sproto protoc`.
     - This command would:
@@ -145,7 +145,7 @@
 
 - **4.3.3**: Create common generation configurations (Optional)
   - **Assignee**: Cline
-  - **Status**: TODO
+  - **Status**: DONE
   - **Details**: 
     - Allow defining named generation templates within `sproto.yaml`.
     - Example:

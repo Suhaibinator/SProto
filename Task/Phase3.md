@@ -17,7 +17,7 @@
 
 - **3.1.2**: Implement import path extraction during publish
   - **Assignee**: Cline
-  - **Status**: TODO
+  - **Status**: DONE
   - **Details**: 
     - Integrate the `ImportScanner` (from Task 2.1.1) into the publish command.
     - Before zipping, scan all `.proto` files in the target directory to extract their import paths.
@@ -29,7 +29,7 @@
 
 - **3.1.3**: Add dependency declaration validation
   - **Assignee**: Cline
-  - **Status**: TODO
+  - **Status**: DONE
   - **Details**: 
     - Before uploading the artifact, if `sproto.yaml` contains dependencies:
       - For each dependency listed:
@@ -42,7 +42,7 @@
 #### Task 3.2: Implement Dependency Resolution Command
 - **3.2.1**: Create new `resolve` command structure
   - **Assignee**: Cline
-  - **Status**: TODO
+  - **Status**: DONE
   - **Details**: 
     - Create a new file `internal/cli/resolve.go`.
     - Define a new Cobra command `resolveCmd`:
@@ -67,7 +67,7 @@
 
 - **3.2.2**: Implement recursive dependency fetching
   - **Assignee**: Cline
-  - **Status**: TODO
+  - **Status**: DONE
   - **Details**: 
     - Integrate the `DependencyGraph` resolver (Task 2.2) into the `resolve` command.
     - After resolving the versions, iterate through the required modules and versions.
@@ -83,7 +83,7 @@
 
 - **3.2.3**: Add progress reporting for resolution process
   - **Assignee**: Cline
-  - **Status**: TODO
+  - **Status**: DONE
   - **Details**: 
     - Implement user-friendly progress indicators during the `resolve` command execution.
     - Use a library like `github.com/vbauerster/mpb` or simple log messages.
@@ -102,7 +102,7 @@
 #### Task 3.3: Enhance Fetch Command
 - **3.3.1**: Update fetch to handle import paths
   - **Assignee**: Cline
-  - **Status**: TODO
+  - **Status**: DONE
   - **Details**: 
     - Modify the existing `fetch` command in `internal/cli/fetch.go`.
     - When extracting the downloaded zip artifact:
@@ -114,7 +114,7 @@
 
 - **3.3.2**: Implement dependency resolution in fetch
   - **Assignee**: Cline
-  - **Status**: TODO
+  - **Status**: DONE
   - **Details**: 
     - Add a new flag `--with-deps` to the `fetch` command.
     - If `--with-deps` is specified:
@@ -126,7 +126,7 @@
 
 - **3.3.3**: Add caching integration
   - **Assignee**: Cline
-  - **Status**: TODO
+  - **Status**: DONE
   - **Details**: 
     - Modify the `fetch` command to check the local cache *before* attempting to download an artifact from the registry.
     - If the requested module version exists in the cache (and `--update` is not specified):

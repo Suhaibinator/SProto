@@ -3,7 +3,7 @@
 #### Task 5.1: Unit Testing
 - **5.1.1**: Write tests for configuration parsing
   - **Assignee**: Cline
-  - **Status**: TODO
+  - **Status**: DONE
   - **Details**: 
     - Create test files (`internal/config/config_test.go`).
     - Test `ParseConfig` and `ParseConfigBytes` with various valid and invalid `sproto.yaml` contents.
@@ -14,7 +14,7 @@
 
 - **5.1.2**: Write tests for dependency resolution
   - **Assignee**: Cline
-  - **Status**: TODO
+  - **Status**: DONE
   - **Details**: 
     - Create test files (`internal/resolver/resolver_test.go`).
     - Test `ResolveVersions` with pre-defined `DependencyGraph` structures (Task 2.2.4).
@@ -26,7 +26,7 @@
 
 - **5.1.3**: Write tests for import path mapping
   - **Assignee**: Cline
-  - **Status**: TODO
+  - **Status**: DONE
   - **Details**: 
     - Create test files (`internal/mapper/mapper_test.go`).
     - Test `AddMapping` and `ResolveImport` using the chosen prefix tree implementation.
@@ -37,380 +37,290 @@
     - Test relative path resolution logic if implemented.
 
 #### Task 5.2: Integration Testing
-- **5.2.1**: Create end-to-end test for publish workflow
-  - **Assignee**: Cline
-  - **Status**: TODO
-  - **Details**: 
-    - Set up a test environment using `docker-compose` with registry, DB, and storage.
-    - Create test proto modules (directories with `.proto` files and `sproto.yaml`).
-    - Write test scripts (e.g., Go tests using `os/exec` or shell scripts) that:
-      - Run `protoreg-cli publish` on test modules.
-      - Verify the command succeeds.
-      - Query the registry API (`/api/v1/modules/...`) to confirm the module, version, import path, and dependencies were stored correctly in the database.
-      - Check the artifact storage (MinIO/local) to ensure the zip file was uploaded.
-      - Test publishing with and without `sproto.yaml`.
-      - Test publishing with valid and invalid dependency declarations (expecting failures for invalid ones).
 
-- **5.2.2**: Create end-to-end test for resolve workflow
+##### Task 5.2.1: End-to-End Test for Publish Workflow
+- **5.2.1.1**: Set up Docker Compose test environment
   - **Assignee**: Cline
   - **Status**: TODO
   - **Details**: 
-    - Use the test environment from 5.2.1, potentially pre-populated with test modules.
-    - Create a test project with a `sproto.yaml` declaring dependencies on the pre-published modules.
-    - Write test scripts that:
-      - Run `protoreg-cli resolve`.
-      - Verify the command succeeds and reports correct resolution.
-      - Check the local cache (`~/.cache/sproto`) to ensure all required module artifacts (including transitive dependencies) were downloaded and potentially extracted correctly.
-      - Test `protoreg-cli fetch --with-deps` similarly.
-      - Test scenarios with version conflicts (expecting failures).
-      - Test cache hits by running resolve/fetch multiple times.
-      - Test `--update` and `--no-cache` flags.
+    - Create a dedicated docker-compose.yaml for testing
+    - Configure registry, PostgreSQL, and MinIO containers
+    - Set up test-specific environment variables and volumes
+    - Create a helper script to start/stop the environment
 
-- **5.2.3**: Test backward compatibility
+- **5.2.1.2**: Create test proto modules
   - **Assignee**: Cline
   - **Status**: TODO
   - **Details**: 
-    - Create test scenarios using the *old* CLI version (before these changes) against the *new* server version, and vice-versa.
-    - Verify that existing commands (`publish` without `sproto.yaml`, `fetch` without `--with-deps`, `list`) continue to function as expected.
-    - Publish a module using the old CLI and ensure it can be fetched/listed by the new CLI/API.
-    - Publish a module using the new CLI (without dependency features) and ensure it can be fetched/listed by the old CLI.
-    - Ensure database migrations (Task 1.2.3) handle existing data correctly without loss.
+    - Create sample proto files with imports and dependencies
+    - Create sproto.yaml files with various configurations
+    - Organize modules in a test-friendly directory structure
+    - Include both valid and invalid test cases
+
+- **5.2.1.3**: Write basic publish test script
+  - **Assignee**: Cline
+  - **Status**: TODO
+  - **Details**: 
+    - Create a Go test file for testing publish functionality
+    - Implement test for publishing a simple module without dependencies
+    - Verify success by checking API and storage
+    - Include proper setup and teardown logic
+
+- **5.2.1.4**: Implement tests for publish with dependencies
+  - **Assignee**: Cline
+  - **Status**: TODO
+  - **Details**: 
+    - Add tests for publishing modules with dependencies
+    - Verify correct dependency metadata is stored
+    - Test publishing with valid dependency declarations
+    - Verify import path mappings are correctly stored
+
+- **5.2.1.5**: Add tests for error cases
+  - **Assignee**: Cline
+  - **Status**: TODO
+  - **Details**: 
+    - Test publishing with invalid dependency declarations
+    - Test publishing with missing dependencies
+    - Test publishing with version conflicts
+    - Verify appropriate error messages are returned
+
+##### Task 5.2.2: End-to-End Test for Resolve Workflow
+- **5.2.2.1**: Prepare test modules in registry
+  - **Assignee**: Cline
+  - **Status**: TODO
+  - **Details**: 
+    - Create a script to pre-populate the registry with test modules
+    - Set up a dependency graph with multiple levels
+    - Include modules with version constraints and import paths
+    - Design the test dataset to cover key test scenarios
+
+- **5.2.2.2**: Create test project with dependencies
+  - **Assignee**: Cline
+  - **Status**: TODO
+  - **Details**: 
+    - Create a test project with sproto.yaml declaring dependencies
+    - Include direct and transitive dependency scenarios
+    - Set up version constraints for testing resolution logic
+    - Prepare proto files with imports from dependencies
+
+- **5.2.2.3**: Write basic resolve test
+  - **Assignee**: Cline
+  - **Status**: TODO
+  - **Details**: 
+    - Implement test for basic dependency resolution
+    - Verify correct modules are downloaded to cache
+    - Check correct versions are selected based on constraints
+    - Verify directory structure in cache is correct
+
+- **5.2.2.4**: Implement fetch with dependencies test
+  - **Assignee**: Cline
+  - **Status**: TODO
+  - **Details**: 
+    - Test protoreg-cli fetch --with-deps functionality
+    - Verify all dependencies are correctly downloaded
+    - Test output directory structure with dependencies
+    - Compare with fetch without dependencies
+
+- **5.2.2.5**: Test cache behavior and flags
+  - **Assignee**: Cline
+  - **Status**: TODO
+  - **Details**: 
+    - Test cache hits by running resolve multiple times
+    - Verify --update flag fetches latest versions
+    - Test --no-cache forces re-fetching modules
+    - Validate cache entries and timestamps
+
+##### Task 5.2.3: Backward Compatibility Testing
+- **5.2.3.1**: Test old CLI with new server
+  - **Assignee**: Cline
+  - **Status**: TODO
+  - **Details**: 
+    - Build old CLI version before dependency features
+    - Test basic commands against new server version
+    - Verify publish, fetch, and list still work
+    - Document any compatibility issues
+
+- **5.2.3.2**: Test new CLI with backward compatibility mode
+  - **Assignee**: Cline
+  - **Status**: TODO
+  - **Details**: 
+    - Test new CLI against a server without dependency features
+    - Verify graceful fallback for dependency-related operations
+    - Test publish without dependency features
+    - Test fetch without dependency resolution
+
+- **5.2.3.3**: Verify database migration with existing data
+  - **Assignee**: Cline
+  - **Status**: TODO
+  - **Details**: 
+    - Create a database with old schema and sample data
+    - Run migrations to upgrade to new schema
+    - Verify existing data integrity
+    - Test operations on modules published before migration
 
 #### Task 5.3: Documentation
-- **5.3.1**: Update README.md with new features
-  - **Assignee**: Cline
-  - **Status**: TODO
-  - **Details**: 
-    - Add a new "Dependency Management" section to `README.md` right after the existing "Features" section:
-      ```markdown
-      ## Dependency Management
-      
-      SProto now supports Buf-like dependency management for Protobuf files, allowing you to:
-      
-      * Declare dependencies in a `sproto.yaml` configuration file
-      * Use import paths like `import "github.com/myorg/common/proto/types.proto"`
-      * Automatically fetch and cache dependencies
-      * Generate correct `--proto_path` arguments for protoc
-      ```
-    - Explain the concept of `sproto.yaml` with a clear example:
-      ```markdown
-      ### Configuration File Format
-      
-      Dependencies are managed through a `sproto.yaml` file in the root of your proto directory:
-      
-      ```yaml
-      version: v1
-      name: mycompany/myapp
-      import_path: github.com/mycompany/myapp
-      dependencies:
-        - namespace: mycompany
-          name: common
-          version: ">=v1.0.0 <v2.0.0"
-          import_path: github.com/mycompany/common
-      ```
-      ```
-    - Update the Architecture diagram to include the dependency resolution flow:
-      ```mermaid
-      graph LR
-        Dev["Developer Machine
-      (Proto Files)"] --> CLI["Registry Client
-      protoreg-cli"];
-        CLI --> Server["Registry Server
-      Go App in Docker"];
-        Server --> DB[("PostgreSQL
-      Metadata")];
-        Server --> S3[("MinIO / S3
-      Artifacts")];
-        CLI -- "1. Resolve deps" --> CLI;
-        CLI -- "2. Pull artifacts" --> CLI;
-        CLI -- "3. Cache locally" --> Cache[("Local Cache
-      ~/.cache/sproto")];
-      ```
-    - Expand the CLI Usage section with the new commands:
-      ```markdown
-      ### Dependency Resolution Commands
-      
-      1. **`resolve`**: Resolves and fetches all dependencies for a module.
-         ```bash
-         # Resolve dependencies for the current directory (using sproto.yaml)
-         protoreg-cli resolve
-         
-         # Resolve dependencies for a specific module version
-         protoreg-cli resolve mycompany/common@v1.0.0
-         
-         # Force re-fetching even if cached
-         protoreg-cli resolve --update
-         ```
-      
-      2. **`fetch`** (with enhanced dependency options):
-         ```bash
-         # Fetch a module and all its dependencies
-         protoreg-cli fetch mycompany/auth v1.0.0 --output ./protos --with-deps
-         ```
-      
-      3. **`compile`**: Simplifies running protoc with the correct include paths:
-         ```bash
-         # Compile with resolved dependencies
-         protoreg-cli compile --go_out=./gen
-         ```
-      
-      4. **`cache`**: Manages the local module cache:
-         ```bash
-         # List cached modules
-         protoreg-cli cache list
-         
-         # Clean the cache
-         protoreg-cli cache clean
-         ```
-      ```
-    - Update the main feature list at the top of the README to include:
-      ```markdown
-      *   **Dependency Management:** Declare, resolve, and fetch module dependencies automatically.
-      *   **Import Path Mapping:** Use logical import paths in your .proto files that map to registry modules.
-      *   **Local Caching:** Store and reuse downloaded dependencies to improve build performance.
-      ```
-    - Add a new section linking to detailed documentation:
-      ```markdown
-      ### Dependency Management Documentation
-      
-      * [Configuration File Format](docs/sproto-yaml-spec.md) - Full specification for sproto.yaml
-      * [Usage Examples](docs/usage-examples.md) - Examples of common workflows
-      * [Migrating from Buf](docs/migrating-from-buf.md) - Guide for existing Buf users
-      ```
 
-- **5.3.2**: Create guide for migrating from Buf
+##### Task 5.3.1: Update README.md
+- **5.3.1.1**: Add dependency features to main README features list
   - **Assignee**: Cline
-  - **Status**: TODO
+  - **Status**: DONE
   - **Details**: 
-    - Create a new documentation file (e.g., `docs/migrating-from-buf.md`).
-    - Provide a comparison table of Buf concepts/commands vs. SProto equivalents:
-      ```markdown
-      | Buf Concept/Command | SProto Equivalent | Notes |
-      | ------------------ | ----------------- | ----- |
-      | `buf.yaml` | `sproto.yaml` | Similar structure, different field names |
-      | `buf.build/org/repo` | Registry URL + namespace/name | SProto uses `namespace/name` conventions |
-      | `buf push` | `protoreg-cli publish` | Similar workflow, different options |
-      | `buf build` | `protoreg-cli resolve` | SProto separates resolution from compilation |
-      | `buf generate` | `sproto compile` | SProto focuses on proto_path generation |
-      | `buf mod update` | `protoreg-cli resolve --update` | Similar functionality |
-      | `buf mod init` | Manual creation of `sproto.yaml` | No direct init command yet |
-      ```
-    - Explain how to convert a `buf.yaml` to `sproto.yaml`:
-      - Map `name` field in buf.yaml to `import_path` in sproto.yaml
-      - Convert `deps` array to `dependencies` array with explicit namespace/name
-      - Transform version requirements to semver constraints
-      - Example conversion code in the guide
-    - Detail differences in workflow with code examples:
-      - Buf: `buf push` → SProto: `protoreg-cli publish ./protos --module myorg/mymodule`
-      - Buf: `buf build` → SProto: `protoreg-cli resolve && protoreg-cli compile`
-      - Buf: `buf generate` → SProto: `protoreg-cli compile --go_out=./gen/go`
-    - Address potential pain points:
-      - BSR's hosted service vs. SProto's self-hosted approach
-      - Authentication differences
-      - Migration path for existing modules
-      - Performance considerations for large repositories
-    - Provide a step-by-step migration checklist for teams
-    - Include success stories/case studies if available
+    - Update the main feature list at the top of the README
+    - Add entries for dependency management, import path mapping, and caching
+    - Ensure consistency with existing feature descriptions
 
-- **5.3.3**: Document configuration file format
+- **5.3.1.2**: Create dependency management section
   - **Assignee**: Cline
-  - **Status**: TODO
+  - **Status**: DONE
   - **Details**: 
-    - Create a dedicated documentation file (e.g., `docs/sproto-yaml-spec.md`) with the following sections:
-      - **Introduction**: Explain the purpose of `sproto.yaml` and how it fits into the SProto ecosystem
-      - **File Location**: Describe where the file should be placed (root of proto directory)
-      - **Schema Version**: Document the versioning scheme for the configuration format
-    - Include a complete formal specification in a table format:
-      ```markdown
-      | Field | Type | Required | Description |
-      |-------|------|----------|-------------|
-      | `version` | string | Yes | Schema version (currently only "v1") |
-      | `name` | string | Yes | Module identifier in "namespace/name" format (e.g., "myorg/common") |
-      | `import_path` | string | Yes | Base Go-style import path for this module (e.g., "github.com/myorg/common") |
-      | `dependencies` | array | No | List of modules this module depends on |
-      | `dependencies[].namespace` | string | Yes (if dependencies present) | Organization or user namespace |
-      | `dependencies[].name` | string | Yes (if dependencies present) | Module name |
-      | `dependencies[].version` | string | Yes (if dependencies present) | Version constraint (e.g., "v1.0.0", ">=v1.2.0") |
-      | `dependencies[].import_path` | string | No | Import path prefix for this dependency |
-      ```
-    - Provide a detailed explanation of version constraint syntax based on SemVer:
-      ```markdown
-      ## Version Constraints
-      
-      SProto supports the following version constraint operators:
-      
-      - Exact version: `v1.2.3`
-      - Greater than: `>v1.2.3`
-      - Greater than or equal: `>=v1.2.3`
-      - Less than: `<v2.0.0`
-      - Less than or equal: `<=v1.9.0`
-      - Tilde range: `~v1.2.3` (equivalent to `>=v1.2.3 <v1.3.0`)
-      - Caret range: `^v1.2.3` (equivalent to `>=v1.2.3 <v2.0.0`)
-      
-      Multiple constraints can be combined with spaces or commas:
-      
-      ```yaml
-      version: ">=v1.2.0 <v2.0.0"  # Greater than or equal to v1.2.0 and less than v2.0.0
-      ```
-      ```
-    - Include complete examples for different use cases:
-      - Basic module without dependencies:
-        ```yaml
-        version: v1
-        name: myorg/utils
-        import_path: github.com/myorg/utils
-        ```
-      - Module with a single dependency:
-        ```yaml
-        version: v1
-        name: myorg/api
-        import_path: github.com/myorg/api
-        dependencies:
-          - namespace: myorg
-            name: common
-            version: v1.2.0
-            import_path: github.com/myorg/common
-        ```
-      - Module with multiple dependencies with version constraints:
-        ```yaml
-        version: v1
-        name: myorg/service
-        import_path: github.com/myorg/service
-        dependencies:
-          - namespace: myorg
-            name: common
-            version: ">=v1.0.0 <v2.0.0"
-            import_path: github.com/myorg/common
-          - namespace: myorg
-            name: api
-            version: "^v1.2.3"
-            import_path: github.com/myorg/api
-          - namespace: google
-            name: protobuf
-            version: "v1.28.0"
-            import_path: google/protobuf
-        ```
-      - Advanced example with Generate templates:
-        ```yaml
-        version: v1
-        name: myorg/advanced
-        import_path: github.com/myorg/advanced
-        dependencies:
-          - namespace: myorg
-            name: common
-            version: ">=v1.0.0"
-          - namespace: grpc
-            name: ecosystem
-            version: "v1.0.0"
-        
-        # Generation templates (future feature)
-        generate:
-          go:
-            output: gen/go
-            options:
-              - paths=source_relative
-          grpc-gateway:
-            output: gen/gw
-            options:
-              - logtostderr=true
-        ```
-    - Add an appendix with validation rules:
-      - Namespace and name must be valid identifiers (allowed characters, length limits)
-      - Import paths must be valid (format rules, restricted characters)
-      - Version constraints must follow the SemVer specification
-      - No duplicate dependencies (same namespace/name)
-      - No circular dependencies
-    - Include a JSON Schema link (reference to the schema created in Task 1.1.1)
-    - Add migration notes for users coming from Buf with examples of equivalent files
-    - Include troubleshooting section for common configuration errors
+    - Add a new "Dependency Management" section after "Features"
+    - Explain key concepts and capabilities
+    - Include a basic sproto.yaml example
+    - Highlight advantages over manual dependency management
 
-- **5.3.4**: Create usage examples
+- **5.3.1.3**: Update architecture diagram
+  - **Assignee**: Cline
+  - **Status**: DONE
+  - **Details**: 
+    - Add dependency resolution flow to the existing diagram
+    - Show local cache interactions
+    - Include dependency resolution steps
+    - Update the mermaid code and ensure it renders correctly
+
+- **5.3.1.4**: Add CLI dependency commands documentation
+  - **Assignee**: Cline
+  - **Status**: DONE
+  - **Details**: 
+    - Expand CLI Usage section with new commands
+    - Document resolve, fetch --with-deps, compile, and cache commands
+    - Include command examples with common options
+    - Show example output for key commands
+
+- **5.3.1.5**: Add documentation links section
+  - **Assignee**: Cline
+  - **Status**: DONE
+  - **Details**: 
+    - Create section for additional documentation
+    - Add links to all new documentation files
+    - Provide brief descriptions of each linked document
+    - Ensure paths are correct relative to repository structure
+
+##### Task 5.3.2: Migrating from Buf Guide
+- **5.3.2.1**: Create comparison table
+  - **Assignee**: Cline
+  - **Status**: DONE
+  - **Details**: 
+    - Create docs/migrating-from-buf.md file
+    - Build comparison table of Buf vs SProto concepts
+    - Include commands, file formats, and terminology
+    - Add detailed notes column for important differences
+
+- **5.3.2.2**: Document configuration conversion
   - **Assignee**: Cline
   - **Status**: TODO
   - **Details**: 
-    - Create a new documentation file (e.g., `docs/usage-examples.md`) with clear, comprehensive examples
-    - Structure the document with these major sections:
-      - **Introduction**: Overview of what the examples cover and how they build upon each other
-      - **Prerequisites**: Required tools (protoreg-cli, protoc, etc.), sample repositories used in examples
-      - **Getting Started**: Installation and basic setup instructions
-    - Provide detailed step-by-step examples for these common workflows, each with its own section:
-      1. **Creating and Publishing a New Module**:
-         ```markdown
-         ## Creating and Publishing a New Module
-         
-         This example demonstrates creating a simple "common" module with basic message types and publishing it to the registry.
-         
-         ### Step 1: Create the module structure
-         
-         ```bash
-         mkdir -p common/types
-         ```
-         
-         ### Step 2: Create a basic message type
-         
-         Create `common/types/user.proto`:
-         
-         ```protobuf
-         syntax = "proto3";
-         
-         package myorg.common.types;
-         
-         message User {
-           string id = 1;
-           string name = 2;
-           string email = 3;
-         }
-         ```
-         
-         ### Step 3: Create the sproto.yaml configuration
-         
-         Create `common/sproto.yaml`:
-         
-         ```yaml
-         version: v1
-         name: myorg/common
-         import_path: github.com/myorg/common
-         ```
-         
-         ### Step 4: Publish the module
-         
-         ```bash
-         cd common
-         protoreg-cli publish . --version v1.0.0
-         ```
-         ```
-      2. **Creating a Module with Dependencies**:
-         - Example with a service that depends on the common module
-         - Show both proto files and sproto.yaml with dependencies
-         - Demonstrate how to reference types from dependencies in your proto files
-      3. **Publishing a Module with Dependencies**:
-         - Show validation process, warnings, and success output
-         - Example of fixing issues that might occur during publish
-      4. **Resolving Dependencies for a Project**:
-         - How to use `protoreg-cli resolve` command to fetch all dependencies
-         - Explain the resolution process and output
-         - Show how to use `--update` flag to refresh dependencies
-      5. **Fetching Specific Modules with Dependencies**:
-         - Using `protoreg-cli fetch` with `--with-deps` option
-         - Demonstrate correct directory structure after fetch
-         - Comparison between fetching with and without dependencies
-      6. **Compiling Protos with Resolved Dependencies**:
-         - Using `protoreg-cli compile` to automatically handle includes
-         - Example for generating Go code using the correct proto paths
-         - Example with multiple output formats (Go, gRPC, etc.)
-      7. **Managing the Cache**:
-         - Show cache list, inspect, clean and invalidate commands
-         - Real-world examples of when to clean or invalidate cache
-         - Example output of cache operations
-    - For each workflow example, include:
-      - Complete sample code (proto files, sproto.yaml) with syntax highlighting
-      - Full command-line examples with expected output
-      - Explanation of key concepts and how they relate to SProto's dependency system
-      - Troubleshooting tips for common issues
-    - Add advanced examples section:
-      - Working with complex dependency graphs with diamond dependencies
-      - Handling version conflicts
-      - Migration example from Buf to SProto
-      - Integration with CI/CD pipelines
-    - Create a cheat sheet at the end with common commands and options
-    - Include downloadable example repository with all the example code ready to run
+    - Document buf.yaml to sproto.yaml conversion process
+    - Provide field-by-field mapping instructions
+    - Include example of before/after files
+    - Note any fields without direct equivalents
+
+- **5.3.2.3**: Document workflow differences
+  - **Assignee**: Cline
+  - **Status**: TODO
+  - **Details**: 
+    - Compare common workflows between Buf and SProto
+    - Include command examples for each platform
+    - Detail how tasks map between the two systems
+    - Highlight areas where SProto differs significantly
+
+- **5.3.2.4**: Create migration checklist
+  - **Assignee**: Cline
+  - **Status**: TODO
+  - **Details**: 
+    - Develop step-by-step migration guide
+    - Address potential pain points and solutions
+    - Include sections for different types of Buf usage
+    - Add troubleshooting section for common issues
+
+##### Task 5.3.3: Configuration Format Documentation
+- **5.3.3.1**: Document basic schema
+  - **Assignee**: Cline
+  - **Status**: TODO
+  - **Details**: 
+    - Create docs/sproto-yaml-spec.md file
+    - Document file purpose and location
+    - Create formal specification table of all fields
+    - Include required/optional status for each field
+
+- **5.3.3.2**: Document version constraints
+  - **Assignee**: Cline
+  - **Status**: TODO
+  - **Details**: 
+    - Provide detailed explanation of version constraint syntax
+    - Document all supported operators (exact, ranges, etc.)
+    - Include examples of combining constraints
+    - Explain semantics of different constraints
+
+- **5.3.3.3**: Create configuration examples
+  - **Assignee**: Cline
+  - **Status**: TODO
+  - **Details**: 
+    - Create examples for different use cases
+    - Include basic module, single dependency, multiple dependencies
+    - Show advanced configuration options
+    - Add comments explaining key aspects of each example
+
+- **5.3.3.4**: Document validation rules
+  - **Assignee**: Cline
+  - **Status**: TODO
+  - **Details**: 
+    - Document all validation rules for sproto.yaml
+    - Include format requirements for each field
+    - Document rules for valid dependencies
+    - Add common validation error messages and how to fix them
+
+##### Task 5.3.4: Usage Examples Documentation
+- **5.3.4.1**: Basic module publishing example
+  - **Assignee**: Cline
+  - **Status**: TODO
+  - **Details**: 
+    - Create docs/usage-examples.md file
+    - Document step-by-step process of creating and publishing a module
+    - Include proto file and sproto.yaml examples
+    - Show complete command examples with expected output
+
+- **5.3.4.2**: Module with dependencies example
+  - **Assignee**: Cline
+  - **Status**: TODO
+  - **Details**: 
+    - Document creating a module with dependencies
+    - Show how to reference types from dependencies
+    - Include complete proto files and sproto.yaml
+    - Explain key concepts related to dependencies
+
+- **5.3.4.3**: Dependency resolution workflow
+  - **Assignee**: Cline
+  - **Status**: TODO
+  - **Details**: 
+    - Document using resolve command
+    - Explain resolution process and output
+    - Show how to use --update and other flags
+    - Include examples of resolving with different constraints
+
+- **5.3.4.4**: Compile workflow with dependencies
+  - **Assignee**: Cline
+  - **Status**: TODO
+  - **Details**: 
+    - Document using compile command with dependencies
+    - Show how compile automatically handles include paths
+    - Include examples for different output formats
+    - Explain integration with protoc plugins
+
+- **5.3.4.5**: Cache management examples
+  - **Assignee**: Cline
+  - **Status**: TODO
+  - **Details**: 
+    - Document cache commands and operations
+    - Show when and how to use cache clean/invalidate
+    - Include example output of cache operations
+    - Explain cache location and structure

@@ -12,6 +12,9 @@ SProto is a lightweight, self-hostable registry for managing Protobuf (`.proto`)
 *   **Simple API:** RESTful API for publishing, fetching, and listing modules and versions.
 *   **CLI Client:** `protoreg-cli` for easy interaction with the registry from the command line.
 *   **Dockerized:** Easily deployable using Docker and Docker Compose.
+*   **Dependency Management:** Declare, resolve, and fetch module dependencies automatically.
+*   **Import Path Mapping:** Use logical import paths in your `.proto` files that map to registry modules.
+*   **Local Caching:** Store and reuse downloaded dependencies to improve build performance.
 
 ## Architecture
 
@@ -21,6 +24,7 @@ The system comprises the following components:
 2.  **Registry Client (`protoreg-cli`):** A Go CLI tool used by developers to publish proto directories and fetch specific module versions.
 3.  **PostgreSQL:** Stores metadata about modules (namespace, name) and their versions (version string, artifact digest, storage key).
 4.  **MinIO (or S3):** An S3-compatible object storage server used to store the zipped Protobuf artifacts.
+5.  **Local Cache:** Stores downloaded module artifacts on the local filesystem for improved performance and offline use.
 
 ```mermaid
 graph LR
@@ -33,6 +37,10 @@ Go App in Docker"];
 Metadata")];
     Server --> S3[("MinIO / S3
 Artifacts")];
+    CLI -- "1. Resolve deps" --> CLI;
+    CLI -- "2. Pull artifacts" --> CLI;
+    CLI -- "3. Cache locally" --> Cache[("Local Cache
+~/.cache/sproto")];
 ```
 
 ## Getting Started (Local Development)
@@ -136,6 +144,30 @@ For simpler deployments or local testing without external dependencies like Post
 *   **Network Exposure:** Ensure only necessary ports are exposed to the network. The default `docker-compose.yaml` exposes the server (8080) and MinIO UI (9090). Adjust as needed.
 *   **S3 Bucket Permissions:** If using a managed S3 service, configure bucket policies appropriately to restrict access.
 
+## Dependency Management
+
+SProto now supports Buf-like dependency management for Protobuf files, allowing you to:
+
+* Declare dependencies in a `sproto.yaml` configuration file
+* Use import paths like `import "github.com/myorg/common/proto/types.proto"`
+* Automatically fetch and cache dependencies
+* Generate correct `--proto_path` arguments for protoc
+
+### Configuration File Format
+
+Dependencies are managed through a `sproto.yaml` file in the root of your proto directory:
+
+```yaml
+version: v1
+name: mycompany/myapp
+import_path: github.com/mycompany/myapp
+dependencies:
+  - namespace: mycompany
+    name: common
+    version: ">=v1.0.0 <v2.0.0"
+    import_path: github.com/mycompany/common
+```
+
 ## CLI Usage (`protoreg-cli`)
 
 The CLI tool provides commands to interact with the registry.
@@ -194,6 +226,9 @@ The CLI loads its configuration (Registry URL and API Token) with the following 
     # Usage: ./protoreg-cli fetch <namespace/module_name> <version> --output <dir>
     ./protoreg-cli fetch mycompany/user v1.0.0 --output ./downloaded-protos
     # Files will be extracted to ./downloaded-protos/mycompany/user/v1.0.0/
+    
+    # Fetch a module and all its dependencies
+    ./protoreg-cli fetch mycompany/auth v1.0.0 --output ./protos --with-deps
     ```
 
 4.  **`list`**: Lists modules or versions.
@@ -204,6 +239,41 @@ The CLI loads its configuration (Registry URL and API Token) with the following 
     # List versions for a specific module
     ./protoreg-cli list mycompany/user
     ```
+    
+### Dependency Resolution Commands
+
+1. **`resolve`**: Resolves and fetches all dependencies for a module.
+   ```bash
+   # Resolve dependencies for the current directory (using sproto.yaml)
+   ./protoreg-cli resolve
+   
+   # Resolve dependencies for a specific module version
+   ./protoreg-cli resolve mycompany/common@v1.0.0
+   
+   # Force re-fetching even if cached
+   ./protoreg-cli resolve --update
+   ```
+
+2. **`compile`**: Simplifies running protoc with the correct include paths:
+   ```bash
+   # Compile with resolved dependencies
+   ./protoreg-cli compile --go_out=./gen
+   ```
+
+3. **`cache`**: Manages the local module cache:
+   ```bash
+   # List cached modules
+   ./protoreg-cli cache list
+   
+   # Clean the cache
+   ./protoreg-cli cache clean
+   ```
+
+### Dependency Management Documentation
+
+* [Configuration File Format](docs/sproto-yaml-spec.md) - Full specification for sproto.yaml
+* [Usage Examples](docs/usage-examples.md) - Examples of common workflows
+* [Migrating from Buf](docs/migrating-from-buf.md) - Guide for existing Buf users
 
 ## API Specification
 

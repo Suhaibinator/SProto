@@ -18,10 +18,15 @@ require (
 )
 
 require (
+	github.com/VividCortex/ewma v1.2.0 // indirect
+	github.com/acarl005/stripansi v0.0.0-20180116102854-5a71ef0e047d // indirect
 	github.com/bufbuild/protocompile v0.14.1 // indirect
 	github.com/emirpasic/gods v1.18.1 // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
+	github.com/mattn/go-runewidth v0.0.16 // indirect
+	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/stretchr/objx v0.5.2 // indirect
+	github.com/vbauerster/mpb/v8 v8.9.3 // indirect
 	google.golang.org/protobuf v1.36.6 // indirect
 )
 

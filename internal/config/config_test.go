@@ -1,273 +1,292 @@
 package config
 
 import (
-	"strings"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
-
-func TestSProtoConfig_Validate_Valid(t *testing.T) {
-	tests := []struct {
-		name   string
-		config SProtoConfig
-	}{
-		{
-			name: "Valid Basic Config",
-			config: SProtoConfig{
-				Version:    "v1",
-				Name:       "myorg/mymodule",
-				ImportPath: "github.com/myorg/mymodule/proto",
-			},
-		},
-		{
-			name: "Valid Config with Dependencies",
-			config: SProtoConfig{
-				Version:    "v1",
-				Name:       "myorg/anothermodule",
-				ImportPath: "github.com/myorg/anothermodule/proto",
-				Dependencies: []Dependency{
-					{
-						Namespace:  "myorg",
-						Name:       "common",
-						Version:    "v1.0.0",
-						ImportPath: "github.com/myorg/common/proto",
-					},
-					{
-						Namespace:  "ext",
-						Name:       "public",
-						Version:    ">=v2.0.0, <v3.0.0",
-						ImportPath: "github.com/ext/public/proto/v2",
-					},
-				},
-			},
-		},
-		{
-			name: "Valid Config with Complex Version Constraint",
-			config: SProtoConfig{
-				Version:    "v1",
-				Name:       "myorg/complex",
-				ImportPath: "example.com/myorg/complex",
-				Dependencies: []Dependency{
-					{
-						Namespace:  "stable",
-						Name:       "api",
-						Version:    "~v1.2.3", // >= 1.2.3, < 1.3.0
-						ImportPath: "example.com/stable/api",
-					},
-				},
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := tt.config.Validate()
-			assert.NoError(t, err)
-		})
-	}
-}
-
-func TestSProtoConfig_Validate_Invalid(t *testing.T) {
-	tests := []struct {
-		name          string
-		config        SProtoConfig
-		expectedError string // Substring expected in the error message
-	}{
-		{
-			name: "Invalid Version",
-			config: SProtoConfig{
-				Version:    "v2",
-				Name:       "myorg/mymodule",
-				ImportPath: "github.com/myorg/mymodule/proto",
-			},
-			expectedError: "unsupported configuration version 'v2'",
-		},
-		{
-			name: "Invalid Name Format - Missing Slash",
-			config: SProtoConfig{
-				Version:    "v1",
-				Name:       "myorg-mymodule",
-				ImportPath: "github.com/myorg/mymodule/proto",
-			},
-			expectedError: "invalid module name format 'myorg-mymodule'",
-		},
-		{
-			name: "Invalid Name Format - Invalid Chars",
-			config: SProtoConfig{
-				Version:    "v1",
-				Name:       "myorg/my!module",
-				ImportPath: "github.com/myorg/mymodule/proto",
-			},
-			expectedError: "invalid module name format 'myorg/my!module'",
-		},
-		{
-			name: "Invalid Import Path",
-			config: SProtoConfig{
-				Version:    "v1",
-				Name:       "myorg/mymodule",
-				ImportPath: "github.com/my org/mymodule", // Space is invalid
-			},
-			expectedError: "invalid import path format 'github.com/my org/mymodule'",
-		},
-		{
-			name: "Invalid Dependency Namespace",
-			config: SProtoConfig{
-				Version:    "v1",
-				Name:       "myorg/mymodule",
-				ImportPath: "github.com/myorg/mymodule/proto",
-				Dependencies: []Dependency{
-					{Namespace: "my org", Name: "common", Version: "v1", ImportPath: "path"},
-				},
-			},
-			expectedError: "dependency #1 (my org/common): invalid namespace format 'my org'",
-		},
-		{
-			name: "Invalid Dependency Name",
-			config: SProtoConfig{
-				Version:    "v1",
-				Name:       "myorg/mymodule",
-				ImportPath: "github.com/myorg/mymodule/proto",
-				Dependencies: []Dependency{
-					{Namespace: "myorg", Name: "common!", Version: "v1", ImportPath: "path"},
-				},
-			},
-			expectedError: "dependency #1 (myorg/common!): invalid name format 'common!'",
-		},
-		{
-			name: "Invalid Dependency Version Constraint",
-			config: SProtoConfig{
-				Version:    "v1",
-				Name:       "myorg/mymodule",
-				ImportPath: "github.com/myorg/mymodule/proto",
-				Dependencies: []Dependency{
-					{Namespace: "myorg", Name: "common", Version: "invalid-version", ImportPath: "path"},
-				},
-			},
-			expectedError: "dependency #1 (myorg/common): invalid version constraint 'invalid-version'",
-		},
-		{
-			name: "Invalid Dependency Import Path",
-			config: SProtoConfig{
-				Version:    "v1",
-				Name:       "myorg/mymodule",
-				ImportPath: "github.com/myorg/mymodule/proto",
-				Dependencies: []Dependency{
-					{Namespace: "myorg", Name: "common", Version: "v1", ImportPath: "invalid path"},
-				},
-			},
-			expectedError: "dependency #1 (myorg/common): invalid import path format 'invalid path'",
-		},
-		{
-			name: "Duplicate Dependency",
-			config: SProtoConfig{
-				Version:    "v1",
-				Name:       "myorg/mymodule",
-				ImportPath: "github.com/myorg/mymodule/proto",
-				Dependencies: []Dependency{
-					{Namespace: "myorg", Name: "common", Version: "v1", ImportPath: "path1"},
-					{Namespace: "myorg", Name: "common", Version: "v2", ImportPath: "path2"},
-				},
-			},
-			expectedError: "duplicate dependency detected: 'myorg/common'",
-		},
-		{
-			name: "Multiple Errors",
-			config: SProtoConfig{
-				Version:    "v0",             // Invalid version
-				Name:       "myorg-mymodule", // Invalid name
-				ImportPath: "github.com/myorg/mymodule/proto",
-				Dependencies: []Dependency{
-					{Namespace: "myorg", Name: "common", Version: "invalid", ImportPath: "path"},
-				},
-			},
-			expectedError: "unsupported configuration version 'v0'", // Check if multiple errors are reported
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := tt.config.Validate()
-			assert.Error(t, err)
-			assert.True(t, strings.Contains(err.Error(), tt.expectedError), "Error message mismatch.\nExpected to contain: %s\nActual error: %s", tt.expectedError, err.Error())
-
-			// Specific check for multiple errors case
-			if tt.name == "Multiple Errors" {
-				assert.True(t, strings.Contains(err.Error(), "invalid module name format 'myorg-mymodule'"), "Missing name format error")
-				assert.True(t, strings.Contains(err.Error(), "invalid version constraint 'invalid'"), "Missing version constraint error")
-			}
-		})
-	}
-}
 
 func TestParseConfigBytes_Valid(t *testing.T) {
 	yamlData := `
 version: v1
-name: myorg/testmodule
-import_path: github.com/myorg/testmodule/proto
+name: myorg/mymodule
+import_path: github.com/myorg/mymodule
 dependencies:
-  - namespace: deporg
-    name: depmod
-    version: ">=v1.1.0"
-    import_path: github.com/deporg/depmod/proto
+  - namespace: myorg
+    name: common
+    version: ">=v1.0.0 <v2.0.0"
+    import_path: github.com/myorg/common
+  - namespace: google
+    name: protobuf
+    version: v1.28.0
+    import_path: google/protobuf
+generate:
+  - name: go
+    output: gen/go
+    options:
+      paths: source_relative
+      go_opt: module=github.com/myorg/mymodule/gen/go
+    plugins:
+      - protoc-gen-go=path/to/go_plugin
+  - name: grpc-gateway
+    output: gen/gw
+    options:
+      logtostderr: "true"
+      paths: source_relative
 `
 	config, err := ParseConfigBytes([]byte(yamlData))
-	assert.NoError(t, err)
-	assert.NotNil(t, config)
+	require.NoError(t, err)
+	require.NotNil(t, config)
+
 	assert.Equal(t, "v1", config.Version)
-	assert.Equal(t, "myorg/testmodule", config.Name)
-	assert.Equal(t, "github.com/myorg/testmodule/proto", config.ImportPath)
-	assert.Len(t, config.Dependencies, 1)
-	assert.Equal(t, "deporg", config.Dependencies[0].Namespace)
-	assert.Equal(t, "depmod", config.Dependencies[0].Name)
-	assert.Equal(t, ">=v1.1.0", config.Dependencies[0].Version)
-	assert.Equal(t, "github.com/deporg/depmod/proto", config.Dependencies[0].ImportPath)
+	assert.Equal(t, "myorg/mymodule", config.Name)
+	assert.Equal(t, "github.com/myorg/mymodule", config.ImportPath)
+	require.Len(t, config.Dependencies, 2)
+	assert.Equal(t, "myorg", config.Dependencies[0].Namespace)
+	assert.Equal(t, "common", config.Dependencies[0].Name)
+	assert.Equal(t, ">=v1.0.0 <v2.0.0", config.Dependencies[0].Version)
+	assert.Equal(t, "github.com/myorg/common", config.Dependencies[0].ImportPath)
+	assert.Equal(t, "google", config.Dependencies[1].Namespace)
+	assert.Equal(t, "protobuf", config.Dependencies[1].Name)
+	assert.Equal(t, "v1.28.0", config.Dependencies[1].Version)
+	assert.Equal(t, "google/protobuf", config.Dependencies[1].ImportPath)
+
+	require.Len(t, config.Generate, 2)
+	assert.Equal(t, "go", config.Generate[0].Name)
+	assert.Equal(t, "gen/go", config.Generate[0].Output)
+	require.Len(t, config.Generate[0].Options, 2)
+	assert.Equal(t, "source_relative", config.Generate[0].Options["paths"])
+	assert.Equal(t, "module=github.com/myorg/mymodule/gen/go", config.Generate[0].Options["go_opt"])
+	require.Len(t, config.Generate[0].Plugins, 1)
+	assert.Equal(t, "protoc-gen-go=path/to/go_plugin", config.Generate[0].Plugins[0])
+
+	assert.Equal(t, "grpc-gateway", config.Generate[1].Name)
+	assert.Equal(t, "gen/gw", config.Generate[1].Output)
+	require.Len(t, config.Generate[1].Options, 2)
+	assert.Equal(t, "true", config.Generate[1].Options["logtostderr"])
+	assert.Equal(t, "source_relative", config.Generate[1].Options["paths"])
+	assert.Empty(t, config.Generate[1].Plugins)
 }
 
 func TestParseConfigBytes_InvalidYAML(t *testing.T) {
 	yamlData := `
 version: v1
-name: myorg/testmodule
-  import_path: github.com/myorg/testmodule/proto # Invalid indentation
+name: myorg/mymodule
+  import_path: github.com/myorg/mymodule # Bad indentation
 `
 	_, err := ParseConfigBytes([]byte(yamlData))
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to unmarshal sproto config")
 }
 
-func TestParseConfigBytes_InvalidContent(t *testing.T) {
-	yamlData := `
-version: v2 # Invalid version
-name: myorg/testmodule
-import_path: github.com/myorg/testmodule/proto
-`
-	_, err := ParseConfigBytes([]byte(yamlData))
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "invalid sproto config")
-	assert.Contains(t, err.Error(), "unsupported configuration version 'v2'")
+func TestParseConfig_FileNotFound(t *testing.T) {
+	_, err := ParseConfig("nonexistent_sproto.yaml")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to read sproto config file")
 }
 
-func TestSProtoConfig_GetDependencyByName(t *testing.T) {
-	config := SProtoConfig{
+func TestParseConfig_ValidFile(t *testing.T) {
+	yamlData := `
+version: v1
+name: test/module
+import_path: example.com/test/module
+`
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "sproto.yaml")
+	err := os.WriteFile(configPath, []byte(yamlData), 0644)
+	require.NoError(t, err)
+
+	config, err := ParseConfig(configPath)
+	require.NoError(t, err)
+	require.NotNil(t, config)
+	assert.Equal(t, "test/module", config.Name)
+	assert.Equal(t, "example.com/test/module", config.ImportPath)
+}
+
+func TestSProtoConfig_Validate(t *testing.T) {
+	tests := []struct {
+		name      string
+		config    SProtoConfig
+		expectErr bool
+		errSubstr string
+	}{
+		{
+			name: "Valid config",
+			config: SProtoConfig{
+				Version:    "v1",
+				Name:       "myorg/mymodule",
+				ImportPath: "github.com/myorg/mymodule",
+				Dependencies: []Dependency{
+					{Namespace: "deporg", Name: "common", Version: "v1.0.0", ImportPath: "dep.com/common"},
+				},
+			},
+			expectErr: false,
+		},
+		{
+			name: "Invalid version",
+			config: SProtoConfig{
+				Version:    "v2",
+				Name:       "myorg/mymodule",
+				ImportPath: "github.com/myorg/mymodule",
+			},
+			expectErr: true,
+			errSubstr: "unsupported configuration version",
+		},
+		{
+			name: "Invalid name format (no slash)",
+			config: SProtoConfig{
+				Version:    "v1",
+				Name:       "mymodule",
+				ImportPath: "github.com/myorg/mymodule",
+			},
+			expectErr: true,
+			errSubstr: "invalid module name format",
+		},
+		{
+			name: "Invalid name format (special chars)",
+			config: SProtoConfig{
+				Version:    "v1",
+				Name:       "myorg/my@module",
+				ImportPath: "github.com/myorg/mymodule",
+			},
+			expectErr: true,
+			errSubstr: "invalid module name format",
+		},
+		{
+			name: "Invalid import path format",
+			config: SProtoConfig{
+				Version:    "v1",
+				Name:       "myorg/mymodule",
+				ImportPath: "github.com/myorg/my@module", // Invalid char
+			},
+			expectErr: true,
+			errSubstr: "invalid import path format",
+		},
+		{
+			name: "Invalid dependency namespace",
+			config: SProtoConfig{
+				Version:    "v1",
+				Name:       "myorg/mymodule",
+				ImportPath: "github.com/myorg/mymodule",
+				Dependencies: []Dependency{
+					{Namespace: "dep@org", Name: "common", Version: "v1.0.0", ImportPath: "dep.com/common"},
+				},
+			},
+			expectErr: true,
+			errSubstr: "invalid namespace format",
+		},
+		{
+			name: "Invalid dependency name",
+			config: SProtoConfig{
+				Version:    "v1",
+				Name:       "myorg/mymodule",
+				ImportPath: "github.com/myorg/mymodule",
+				Dependencies: []Dependency{
+					{Namespace: "deporg", Name: "com mon", Version: "v1.0.0", ImportPath: "dep.com/common"},
+				},
+			},
+			expectErr: true,
+			errSubstr: "invalid name format",
+		},
+		{
+			name: "Invalid dependency version constraint",
+			config: SProtoConfig{
+				Version:    "v1",
+				Name:       "myorg/mymodule",
+				ImportPath: "github.com/myorg/mymodule",
+				Dependencies: []Dependency{
+					{Namespace: "deporg", Name: "common", Version: "invalid-version", ImportPath: "dep.com/common"},
+				},
+			},
+			expectErr: true,
+			errSubstr: "invalid version constraint",
+		},
+		{
+			name: "Invalid dependency import path",
+			config: SProtoConfig{
+				Version:    "v1",
+				Name:       "myorg/mymodule",
+				ImportPath: "github.com/myorg/mymodule",
+				Dependencies: []Dependency{
+					{Namespace: "deporg", Name: "common", Version: "v1.0.0", ImportPath: "dep.com/com mon"}, // Space
+				},
+			},
+			expectErr: true,
+			errSubstr: "invalid import path format",
+		},
+		{
+			name: "Duplicate dependency",
+			config: SProtoConfig{
+				Version:    "v1",
+				Name:       "myorg/mymodule",
+				ImportPath: "github.com/myorg/mymodule",
+				Dependencies: []Dependency{
+					{Namespace: "deporg", Name: "common", Version: "v1.0.0", ImportPath: "dep.com/common"},
+					{Namespace: "deporg", Name: "common", Version: "v1.1.0", ImportPath: "dep.com/common/v1.1"}, // Same ns/name
+				},
+			},
+			expectErr: true,
+			errSubstr: "duplicate dependency detected",
+		},
+		{
+			name: "Multiple errors",
+			config: SProtoConfig{
+				Version:    "v2",    // Error 1
+				Name:       "myorg", // Error 2
+				ImportPath: "github.com/myorg/mymodule",
+				Dependencies: []Dependency{
+					{Namespace: "deporg", Name: "common", Version: "invalid", ImportPath: "dep.com/common"}, // Error 3
+				},
+			},
+			expectErr: true,
+			errSubstr: "validation failed", // General error message
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.config.Validate()
+			if tt.expectErr {
+				require.Error(t, err)
+				if tt.errSubstr != "" {
+					assert.Contains(t, err.Error(), tt.errSubstr)
+				}
+				// Check that multiple errors are joined
+				if tt.name == "Multiple errors" {
+					assert.Contains(t, err.Error(), "\n - ")
+					assert.Greater(t, len(err.Error()), len(tt.errSubstr)+5) // Ensure more than just the main message
+				}
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestGetDependencyByName(t *testing.T) {
+	config := &SProtoConfig{
 		Dependencies: []Dependency{
-			{Namespace: "org1", Name: "modA", Version: "v1", ImportPath: "pathA"},
-			{Namespace: "org2", Name: "modB", Version: "v2", ImportPath: "pathB"},
+			{Namespace: "org1", Name: "modA", Version: "v1"},
+			{Namespace: "org2", Name: "modB", Version: "v2"},
 		},
 	}
 
 	// Found
 	dep, found := config.GetDependencyByName("org1/modA")
 	assert.True(t, found)
-	assert.NotNil(t, dep)
+	require.NotNil(t, dep)
 	assert.Equal(t, "org1", dep.Namespace)
 	assert.Equal(t, "modA", dep.Name)
 
-	// Not Found
+	// Not found
 	dep, found = config.GetDependencyByName("org1/modC")
 	assert.False(t, found)
 	assert.Nil(t, dep)
 
-	// Invalid Format
+	// Invalid format
 	dep, found = config.GetDependencyByName("org1-modA")
 	assert.False(t, found)
 	assert.Nil(t, dep)

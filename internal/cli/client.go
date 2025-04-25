@@ -162,6 +162,52 @@ func (c *RegistryClient) FetchArtifact(namespace, name, version string) (io.Read
 	return resp.Body, nil // Caller is responsible for closing the body
 }
 
-// TODO: Add methods for fetching dependencies for a module/version (Task 1.3.2 endpoints)
+// FetchModuleDependencies retrieves the list of dependencies for a specific module.
+// Corresponds to GET /api/v1/modules/{namespace}/{module_name}/dependencies.
+func (c *RegistryClient) FetchModuleDependencies(namespace, name string) ([]api.DependencyResponse, error) {
+	c.Logger.Debug("Fetching module dependencies", zap.String("namespace", namespace), zap.String("name", name))
+	// URL encode path segments
+	encodedNamespace := url.PathEscape(namespace)
+	encodedName := url.PathEscape(name)
+	targetURL := fmt.Sprintf("%s/api/v1/modules/%s/%s/dependencies", c.RegistryURL, encodedNamespace, encodedName)
+
+	req, err := http.NewRequest("GET", targetURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request to list module dependencies: %w", err)
+	}
+
+	// Add authentication if needed (assuming dependencies endpoint might require it)
+	// if c.APIToken != "" {
+	// 	req.Header.Set("Authorization", "Bearer "+c.APIToken)
+	// }
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list module dependencies from %s: %w", targetURL, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		// Handle 404 specifically - module might exist but have no dependencies defined yet
+		if resp.StatusCode == http.StatusNotFound {
+			return nil, fmt.Errorf("module '%s/%s' not found when fetching dependencies", namespace, name)
+		}
+		return nil, fmt.Errorf("failed to list module dependencies: received status %d %s, body: %s", resp.StatusCode, http.StatusText(resp.StatusCode), string(bodyBytes))
+	}
+
+	var listResp api.ListModuleDependenciesResponse
+	if err := json.NewDecoder(resp.Body).Decode(&listResp); err != nil {
+		return nil, fmt.Errorf("failed to decode list module dependencies response: %w", err)
+	}
+
+	c.Logger.Debug("Successfully fetched module dependencies", zap.String("module", fmt.Sprintf("%s/%s", namespace, name)), zap.Int("count", len(listResp.Dependencies)))
+	// Ensure empty slice, not null, if no dependencies
+	if listResp.Dependencies == nil {
+		return []api.DependencyResponse{}, nil
+	}
+	return listResp.Dependencies, nil
+}
+
 // TODO: Add method for resolving dependencies (Task 1.3.2 endpoint)
 // TODO: Add method for publishing (adapt from internal/cli/publish.go)

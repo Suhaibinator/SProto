@@ -30,6 +30,8 @@ var (
 	publishVersion              string
 	publishConfigPath           string // New flag variable
 	publishSkipImportValidation bool   // Skip import path validation
+	publishValidateDeps         bool   // Validate dependencies exist in registry
+	publishSkipDepsValidation   bool   // Skip dependency validation if needed
 )
 
 // publishCmd represents the publish command
@@ -60,7 +62,13 @@ Examples:
 
   # Publish using a sproto.yaml file at a custom path
   protoreg-cli publish . --config-path ./config/my-sproto.yaml
-`, // Updated Long description
+
+  # Validate dependency versions against the registry
+  protoreg-cli publish . --validate-deps
+
+  # Skip dependency validation
+  protoreg-cli publish . --skip-deps-validation
+`,
 	Args: cobra.ExactArgs(1), // Requires directory path
 	Run: func(cmd *cobra.Command, args []string) {
 		log := GetLogger()
@@ -185,6 +193,113 @@ Examples:
 			log.Fatal("Internal error: Module name, namespace, or version could not be determined.")
 		}
 
+		// --- Validate Dependencies in Registry ---
+		if sprotoConfig != nil && len(sprotoConfig.Dependencies) > 0 && !publishSkipDepsValidation {
+			log.Info("Validating dependencies against registry",
+				zap.Int("count", len(sprotoConfig.Dependencies)),
+				zap.Bool("validate_versions", publishValidateDeps))
+
+			// Create registry client
+			client := NewRegistryClient(registryURL, apiToken, log)
+
+			// Track validation results
+			validCount := 0
+			invalidDeps := make([]string, 0)
+
+			for _, dep := range sprotoConfig.Dependencies {
+				depFullName := fmt.Sprintf("%s/%s", dep.Namespace, dep.Name)
+				log.Debug("Validating dependency", zap.String("dependency", depFullName), zap.String("version", dep.Version))
+
+				// Check if the module exists in the registry
+				_, err := client.FetchModuleMetadata(dep.Namespace, dep.Name)
+				if err != nil {
+					log.Error("Dependency not found in registry",
+						zap.String("dependency", depFullName),
+						zap.Error(err))
+					invalidDeps = append(invalidDeps, fmt.Sprintf("%s: not found in registry", depFullName))
+					continue
+				}
+
+				// Module exists, check versions if requested
+				if publishValidateDeps {
+					versions, err := client.FetchModuleVersions(dep.Namespace, dep.Name)
+					if err != nil {
+						log.Error("Failed to fetch versions for dependency",
+							zap.String("dependency", depFullName),
+							zap.Error(err))
+						invalidDeps = append(invalidDeps, fmt.Sprintf("%s: failed to fetch versions", depFullName))
+						continue
+					}
+
+					// Parse version constraint
+					constraint, err := semver.NewConstraint(dep.Version)
+					if err != nil {
+						log.Error("Invalid version constraint",
+							zap.String("dependency", depFullName),
+							zap.String("constraint", dep.Version),
+							zap.Error(err))
+						invalidDeps = append(invalidDeps, fmt.Sprintf("%s: invalid version constraint '%s'", depFullName, dep.Version))
+						continue
+					}
+
+					// Check if any available version satisfies the constraint
+					satisfied := false
+					for _, versionStr := range versions {
+						// Remove 'v' prefix if present for semver parsing
+						version := versionStr
+						if strings.HasPrefix(version, "v") {
+							version = versionStr[1:]
+						}
+
+						semVer, err := semver.NewVersion(version)
+						if err != nil {
+							log.Debug("Invalid version in registry",
+								zap.String("dependency", depFullName),
+								zap.String("version", versionStr),
+								zap.Error(err))
+							continue
+						}
+
+						if constraint.Check(semVer) {
+							satisfied = true
+							log.Debug("Dependency version constraint satisfied",
+								zap.String("dependency", depFullName),
+								zap.String("constraint", dep.Version),
+								zap.String("matching_version", versionStr))
+							break
+						}
+					}
+
+					if !satisfied {
+						log.Error("No matching version found for dependency",
+							zap.String("dependency", depFullName),
+							zap.String("constraint", dep.Version),
+							zap.Strings("available_versions", versions))
+						invalidDeps = append(invalidDeps, fmt.Sprintf("%s: no version found matching '%s'", depFullName, dep.Version))
+						continue
+					}
+				}
+
+				// Module exists and version constraint is satisfied (if checked)
+				validCount++
+				log.Info("Dependency validation successful", zap.String("dependency", depFullName))
+			}
+
+			// Report results
+			log.Info("Dependency validation complete",
+				zap.Int("valid", validCount),
+				zap.Int("invalid", len(invalidDeps)))
+
+			// Fail if any dependencies are invalid
+			if len(invalidDeps) > 0 {
+				log.Error("Dependency validation failed", zap.Strings("errors", invalidDeps))
+				log.Info("To bypass dependency validation, use --skip-deps-validation")
+				log.Fatal("Cannot publish module with invalid dependencies")
+			}
+		} else if sprotoConfig != nil && len(sprotoConfig.Dependencies) > 0 && publishSkipDepsValidation {
+			log.Info("Skipping dependency validation as requested", zap.Int("dependencies", len(sprotoConfig.Dependencies)))
+		}
+
 		// --- Validate Proto Import Paths ---
 		if !publishSkipImportValidation && sprotoConfig != nil {
 			if sprotoConfig.ImportPath == "" {
@@ -196,27 +311,73 @@ Examples:
 			if err != nil {
 				log.Fatal("Failed to scan proto directory for imports", zap.Error(err))
 			}
+
+			// Track statistics for reporting
+			totalImports := 0
+			resolvedImports := 0
+			unresolvedImports := make([]string, 0)
+			unresolvedFiles := make(map[string][]string) // Map of file -> unresolved imports
+
 			for filePath, imps := range importsMap {
 				for _, imp := range imps {
+					totalImports++
 					cleaned := proto.NormalizeImportPath(imp)
+
 					// Check module import path
 					if strings.HasPrefix(cleaned, sprotoConfig.ImportPath) {
+						resolvedImports++
 						continue
 					}
+
 					// Check dependencies
 					resolved := false
 					for _, dep := range sprotoConfig.Dependencies {
-						if strings.HasPrefix(cleaned, dep.ImportPath) {
+						if dep.ImportPath != "" && strings.HasPrefix(cleaned, dep.ImportPath) {
 							resolved = true
+							resolvedImports++
 							break
 						}
 					}
+
 					if !resolved {
-						log.Fatal("Unresolved import path", zap.String("file", filePath), zap.String("import", cleaned))
+						unresolvedImports = append(unresolvedImports, cleaned)
+						if _, exists := unresolvedFiles[filePath]; !exists {
+							unresolvedFiles[filePath] = make([]string, 0)
+						}
+						unresolvedFiles[filePath] = append(unresolvedFiles[filePath], cleaned)
 					}
 				}
 			}
-			log.Info("All import paths validated successfully")
+
+			// Report unresolved imports if any
+			if len(unresolvedImports) > 0 {
+				log.Error("Found unresolved imports",
+					zap.Int("total", totalImports),
+					zap.Int("resolved", resolvedImports),
+					zap.Int("unresolved", len(unresolvedImports)))
+
+				// Print details of unresolved imports by file
+				for file, imports := range unresolvedFiles {
+					log.Error("Unresolved imports in file",
+						zap.String("file", file),
+						zap.Strings("imports", imports))
+				}
+
+				// Provide hint for resolution
+				log.Error("To resolve these imports:",
+					zap.String("hint1", "Add required dependencies to sproto.yaml"),
+					zap.String("hint2", "Run with --skip-import-validation to bypass this check"))
+
+				log.Fatal("Cannot publish module with unresolved imports")
+			}
+
+			log.Info("All import paths validated successfully",
+				zap.Int("total_imports", totalImports),
+				zap.Int("resolved_imports", resolvedImports))
+		} else if !publishSkipImportValidation && sprotoConfig == nil {
+			log.Info("Skipping import validation: no sproto.yaml found")
+		} else {
+			log.Info("Skipping import validation as requested")
 		}
 
 		// --- Zip Directory & Calculate Hash ---
@@ -411,6 +572,9 @@ func init() {
 	publishCmd.Flags().StringVarP(&publishVersion, "version", "v", "", "Semantic version for the artifact (e.g., v1.2.3) (optional if sproto.yaml is used)")
 	publishCmd.Flags().StringVar(&publishConfigPath, "config-path", "", "Path to a sproto.yaml configuration file (defaults to ./sproto.yaml if exists)")
 	publishCmd.Flags().BoolVar(&publishSkipImportValidation, "skip-import-validation", false, "Skip scanning and validating .proto import paths")
+	publishCmd.Flags().BoolVar(&publishValidateDeps, "validate-deps", false, "Validate dependency version constraints against registry")
+	publishCmd.Flags().BoolVar(&publishSkipDepsValidation, "skip-deps-validation", false, "Skip validating dependencies against registry")
+
 	// We no longer mark module/version as required here; validation happens in Run based on config presence.
 
 	// Inherits --registry-url and --api-token from root persistent flags

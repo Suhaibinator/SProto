@@ -92,6 +92,7 @@ type SProtoConfig struct {
 	Name         string       `yaml:"name"` // Format: "namespace/name"
 	ImportPath   string       `yaml:"import_path"`
 	Dependencies []Dependency `yaml:"dependencies,omitempty"`
+	Generate     []Generate   `yaml:"generate,omitempty"` // Added generation configurations
 }
 
 // Dependency represents a single dependency listed in sproto.yaml.
@@ -210,3 +211,11 @@ func (c *SProtoConfig) Validate() error {
 
 // Note: Circular dependency checks are more complex and might involve building a graph.
 // This basic validation focuses on format and syntax.
+
+// Generate represents a single generation template in sproto.yaml.
+type Generate struct {
+	Name    string            `yaml:"name"`    // Name of the template (e.g., "go", "grpc-gateway")
+	Output  string            `yaml:"output"`  // Output directory for generated files
+	Options map[string]string `yaml:"options"` // Options passed to protoc (e.g., --go_out, --go_opt)
+	Plugins []string          `yaml:"plugins"` // Protoc plugins to use
+}
