@@ -3,7 +3,7 @@
 #### Task 3.1: Update Publish Command
 - **3.1.1**: Extend publish command to process sproto.yaml
   - **Assignee**: Cline
-  - **Status**: TODO
+  - **Status**: DONE
   - **Details**: 
     - Modify `internal/cli/publish.go` to automatically detect and parse `sproto.yaml` in the root of the directory being published.
     - If `sproto.yaml` is found:

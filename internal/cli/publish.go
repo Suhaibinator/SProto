@@ -18,14 +18,18 @@ import (
 
 	"github.com/Masterminds/semver/v3"
 	"github.com/Suhaibinator/SProto/internal/api"
+	"github.com/Suhaibinator/SProto/internal/config"
+	"github.com/Suhaibinator/SProto/internal/proto" // Import proto scanner
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
 )
 
 var (
-	publishModuleName string
-	publishVersion    string
+	publishModuleName           string
+	publishVersion              string
+	publishConfigPath           string // New flag variable
+	publishSkipImportValidation bool   // Skip import path validation
 )
 
 // publishCmd represents the publish command
@@ -35,11 +39,28 @@ var publishCmd = &cobra.Command{
 	Long: `Zips the contents of the specified directory (containing .proto files),
 calculates its SHA256 digest, and uploads it to the registry as a new module version.
 
-Requires --module and --version flags.
-Authentication via API token is required.
+Module name, version, and dependencies can be specified via a 'sproto.yaml' file
+in the root of the directory being published, or explicitly via --module and --version flags.
+If 'sproto.yaml' is present, --module and --version flags are optional and override the file.
 
-Example:
-  protoreg-cli publish ./path/to/protos --module mycompany/user --version v1.0.0`,
+Requires authentication via API token.
+
+Examples:
+  # Publish using sproto.yaml in the current directory
+  protoreg-cli publish .
+
+  # Publish using sproto.yaml in a specific directory
+  protoreg-cli publish ./path/to/protos
+
+  # Publish overriding version from sproto.yaml
+  protoreg-cli publish . --version v1.1.0
+
+  # Publish without sproto.yaml (requires --module and --version)
+  protoreg-cli publish ./path/to/protos --module mycompany/user --version v1.0.0
+
+  # Publish using a sproto.yaml file at a custom path
+  protoreg-cli publish . --config-path ./config/my-sproto.yaml
+`, // Updated Long description
 	Args: cobra.ExactArgs(1), // Requires directory path
 	Run: func(cmd *cobra.Command, args []string) {
 		log := GetLogger()
@@ -51,12 +72,6 @@ Example:
 		}
 		if apiToken == "" {
 			log.Fatal("API token is required for publishing. Use --api-token flag, PROTOREG_API_TOKEN env var, or 'protoreg-cli configure'.")
-		}
-		if publishModuleName == "" {
-			log.Fatal("--module flag is required")
-		}
-		if publishVersion == "" {
-			log.Fatal("--version flag is required")
 		}
 
 		protoDir := args[0]
@@ -73,19 +88,136 @@ Example:
 			log.Fatal("Input path is not a directory", zap.String("path", protoDir))
 		}
 
-		parts := strings.SplitN(publishModuleName, "/", 2)
-		if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-			log.Fatal("Invalid module name format. Expected 'namespace/module_name'.", zap.String("module", publishModuleName))
+		// --- Load and Validate sproto.yaml ---
+		var sprotoConfig *config.SProtoConfig
+		configFilePath := publishConfigPath // Start with flag value
+		if configFilePath == "" {
+			// If flag is not set, check for sproto.yaml in the root of the protoDir
+			defaultConfigPath := filepath.Join(protoDir, "sproto.yaml")
+			if _, err := os.Stat(defaultConfigPath); err == nil {
+				configFilePath = defaultConfigPath
+				log.Debug("Found default sproto.yaml", zap.String("path", configFilePath))
+			} else if !os.IsNotExist(err) {
+				log.Fatal("Error checking for default sproto.yaml", zap.String("path", defaultConfigPath), zap.Error(err))
+			}
 		}
-		namespace := parts[0]
-		moduleName := parts[1]
 
-		semVer, err := semver.NewVersion(publishVersion)
-		if err != nil {
-			log.Fatal("Invalid semantic version format for --version flag", zap.String("version", publishVersion), zap.Error(err))
+		if configFilePath != "" {
+			log.Info("Attempting to load sproto.yaml", zap.String("path", configFilePath))
+			cfg, parseErr := config.ParseConfig(configFilePath) // ParseConfig includes validation
+			if parseErr != nil {
+				log.Fatal("Failed to parse or validate sproto.yaml", zap.String("path", configFilePath), zap.Error(parseErr))
+			}
+			sprotoConfig = cfg
+			log.Info("Successfully loaded and validated sproto.yaml")
+		} else {
+			log.Info("No sproto.yaml found or specified, relying on flags.")
 		}
-		// Ensure 'v' prefix
-		versionStr := "v" + semVer.String()
+
+		// --- Determine Module Name and Version ---
+		var namespace, moduleName string
+		var versionStr string
+
+		if sprotoConfig != nil {
+			// Use values from config, overridden by flags if set
+			parts := strings.SplitN(sprotoConfig.Name, "/", 2)
+			if len(parts) != 2 {
+				// Should be caught by config validation, but safety check
+				log.Fatal("Invalid module name format in sproto.yaml", zap.String("name", sprotoConfig.Name))
+			}
+			namespace = parts[0]
+			moduleName = parts[1]
+			versionStr = sprotoConfig.Version // Use version from config
+
+			// Use dependencies from config
+
+			// Override version from flag if provided
+			if publishVersion != "" {
+				semVer, err := semver.NewVersion(publishVersion)
+				if err != nil {
+					log.Fatal("Invalid semantic version format for --version flag override", zap.String("version", publishVersion), zap.Error(err))
+				}
+				versionStr = "v" + semVer.String() // Ensure 'v' prefix
+				log.Info("Overriding version from sproto.yaml with flag value", zap.String("version", versionStr))
+			} else if versionStr == "" {
+				// Version is required either in config or flag
+				log.Fatal("Module version is required but not specified in sproto.yaml or via --version flag.")
+			}
+
+			// Override module name from flag if provided (less common, but support)
+			if publishModuleName != "" {
+				parts := strings.SplitN(publishModuleName, "/", 2)
+				if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+					log.Fatal("Invalid module name format for --module flag override. Expected 'namespace/module_name'.", zap.String("module", publishModuleName))
+				}
+				namespace = parts[0]
+				moduleName = parts[1]
+				log.Info("Overriding module name from sproto.yaml with flag value", zap.String("module", publishModuleName))
+			}
+
+		} else {
+			// No sproto.yaml, --module and --version flags are required
+			if publishModuleName == "" {
+				log.Fatal("--module flag is required when no sproto.yaml is found.")
+			}
+			if publishVersion == "" {
+				log.Fatal("--version flag is required when no sproto.yaml is found.")
+			}
+
+			parts := strings.SplitN(publishModuleName, "/", 2)
+			if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+				log.Fatal("Invalid module name format. Expected 'namespace/module_name'.", zap.String("module", publishModuleName))
+			}
+			namespace = parts[0]
+			moduleName = parts[1]
+
+			semVer, err := semver.NewVersion(publishVersion)
+			if err != nil {
+				log.Fatal("Invalid semantic version format for --version flag", zap.String("version", publishVersion), zap.Error(err))
+			}
+			versionStr = "v" + semVer.String() // Ensure 'v' prefix
+
+		}
+
+		// Final check on determined values
+		if namespace == "" || moduleName == "" || versionStr == "" {
+			// This should ideally not be reached due to checks above, but as a safeguard
+			log.Fatal("Internal error: Module name, namespace, or version could not be determined.")
+		}
+
+		// --- Validate Proto Import Paths ---
+		if !publishSkipImportValidation && sprotoConfig != nil {
+			if sprotoConfig.ImportPath == "" {
+				log.Fatal("import_path is required in sproto.yaml for import validation")
+			}
+			log.Info("Scanning .proto files for import validation")
+			scanner := proto.NewImportScanner(protoDir)
+			importsMap, err := scanner.ScanDirectory(protoDir)
+			if err != nil {
+				log.Fatal("Failed to scan proto directory for imports", zap.Error(err))
+			}
+			for filePath, imps := range importsMap {
+				for _, imp := range imps {
+					cleaned := proto.NormalizeImportPath(imp)
+					// Check module import path
+					if strings.HasPrefix(cleaned, sprotoConfig.ImportPath) {
+						continue
+					}
+					// Check dependencies
+					resolved := false
+					for _, dep := range sprotoConfig.Dependencies {
+						if strings.HasPrefix(cleaned, dep.ImportPath) {
+							resolved = true
+							break
+						}
+					}
+					if !resolved {
+						log.Fatal("Unresolved import path", zap.String("file", filePath), zap.String("import", cleaned))
+					}
+				}
+			}
+			log.Info("All import paths validated successfully")
+		}
 
 		// --- Zip Directory & Calculate Hash ---
 		log.Info("Zipping directory contents", zap.String("directory", protoDir))
@@ -174,10 +306,10 @@ Example:
 		body := &bytes.Buffer{}
 		multipartWriter := multipart.NewWriter(body)
 
-		// Create form file field
+		// Create form file field for the artifact
 		part, err := multipartWriter.CreateFormFile("artifact", fmt.Sprintf("%s.zip", versionStr))
 		if err != nil {
-			log.Fatal("Failed to create form file part", zap.Error(err))
+			log.Fatal("Failed to create form file part for artifact", zap.Error(err))
 		}
 
 		// Write zip data to the form file field
@@ -185,6 +317,28 @@ Example:
 		if err != nil {
 			log.Fatal("Failed to write zip data to multipart form", zap.Error(err))
 		}
+
+		// Add sproto.yaml content as a separate form field if available
+		// NOTE: The API handler expects the artifact itself to contain sproto.yaml
+		// It does not currently read a separate form field for the config.
+		// We will rely on the handler extracting it from the zip.
+		// If we needed to send it separately, the API handler would need modification.
+		// if sprotoConfig != nil {
+		// 	configPart, err := multipartWriter.CreateFormFile("sproto_config", "sproto.yaml")
+		// 	if err != nil {
+		// 		log.Fatal("Failed to create form file part for sproto.yaml", zap.Error(err))
+		// 	}
+		// 	// Marshal the config back to YAML bytes
+		// 	configBytes, err := json.Marshal(sprotoConfig) // Use json.Marshal for simplicity, API expects JSON in body
+		// 	if err != nil {
+		// 		log.Fatal("Failed to marshal sproto config to JSON", zap.Error(err))
+		// 	}
+		// 	_, err = configPart.Write(configBytes)
+		// 	if err != nil {
+		// 		log.Fatal("Failed to write sproto config to multipart form", zap.Error(err))
+		// 	}
+		// 	log.Debug("Added sproto.yaml to multipart form")
+		// }
 
 		// Close multipart writer to finalize boundary
 		err = multipartWriter.Close()
@@ -229,8 +383,17 @@ Example:
 				fmt.Printf("Successfully published %s/%s@%s (Digest: sha256:%s)\n", namespace, moduleName, versionStr, artifactDigestHex)
 			} else {
 				fmt.Printf("Successfully published %s/%s@%s\n", successResp.Namespace, successResp.ModuleName, successResp.Version)
+				if successResp.ImportPath != nil {
+					fmt.Printf("  Import Path: %s\n", *successResp.ImportPath)
+				}
 				fmt.Printf("  Digest: %s\n", successResp.ArtifactDigest)
 				fmt.Printf("  Created At: %s\n", successResp.CreatedAt.Format(time.RFC3339))
+				if len(successResp.Dependencies) > 0 {
+					fmt.Println("  Dependencies:")
+					for _, dep := range successResp.Dependencies {
+						fmt.Printf("    - %s/%s (%s) [Import Path: %s]\n", dep.Namespace, dep.Name, dep.VersionConstraint, dep.ImportPath)
+					}
+				}
 			}
 		} else {
 			log.Error("Publish request failed", zap.Int("status_code", resp.StatusCode))
@@ -243,11 +406,12 @@ Example:
 func init() {
 	rootCmd.AddCommand(publishCmd)
 
-	// Required flags for publish command
-	publishCmd.Flags().StringVarP(&publishModuleName, "module", "m", "", "Full module name (namespace/name) (required)")
-	publishCmd.Flags().StringVarP(&publishVersion, "version", "v", "", "Semantic version for the artifact (e.g., v1.2.3) (required)")
-	_ = publishCmd.MarkFlagRequired("module")
-	_ = publishCmd.MarkFlagRequired("version")
+	// Flags are now optional if sproto.yaml is used
+	publishCmd.Flags().StringVarP(&publishModuleName, "module", "m", "", "Full module name (namespace/name) (optional if sproto.yaml is used)")
+	publishCmd.Flags().StringVarP(&publishVersion, "version", "v", "", "Semantic version for the artifact (e.g., v1.2.3) (optional if sproto.yaml is used)")
+	publishCmd.Flags().StringVar(&publishConfigPath, "config-path", "", "Path to a sproto.yaml configuration file (defaults to ./sproto.yaml if exists)")
+	publishCmd.Flags().BoolVar(&publishSkipImportValidation, "skip-import-validation", false, "Skip scanning and validating .proto import paths")
+	// We no longer mark module/version as required here; validation happens in Run based on config presence.
 
 	// Inherits --registry-url and --api-token from root persistent flags
 }

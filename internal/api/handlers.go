@@ -1,32 +1,124 @@
 package api
 
 import (
-	"log"
-	"net/http"
-	"os"
-	"sort"
-	"strings"
-
-	"errors"
-
-	"fmt"
-	"io"
-	"net/url"
-
-	"github.com/Masterminds/semver/v3"
-
+	"archive/zip"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"net/url"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
 	"time"
 
+	"github.com/Masterminds/semver/v3"
 	"github.com/Suhaibinator/SProto/internal/api/response"
+	"github.com/Suhaibinator/SProto/internal/config" // Added for sproto.yaml parsing
 	"github.com/Suhaibinator/SProto/internal/db"
 	"github.com/Suhaibinator/SProto/internal/models"
-
 	"github.com/Suhaibinator/SProto/internal/storage"
+	"github.com/google/uuid" // Added for storeDependencies
 	"github.com/gorilla/mux"
 	"gorm.io/gorm"
 )
+
+// --- Helper Functions ---
+
+// extractConfigFromZip searches for sproto.yaml in the root of a zip archive
+// and parses it into an SProtoConfig struct.
+func extractConfigFromZip(zipFilePath string) (*config.SProtoConfig, error) {
+	zipReader, err := zip.OpenReader(zipFilePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open zip file '%s': %w", zipFilePath, err)
+	}
+	defer zipReader.Close()
+
+	for _, file := range zipReader.File {
+		// Check if the file is exactly 'sproto.yaml' at the root level
+		// Normalize path separators just in case
+		cleanedName := filepath.ToSlash(file.Name)
+		if cleanedName == "sproto.yaml" {
+			rc, err := file.Open()
+			if err != nil {
+				return nil, fmt.Errorf("failed to open sproto.yaml within zip: %w", err)
+			}
+			defer rc.Close()
+
+			configBytes, err := io.ReadAll(rc)
+			if err != nil {
+				return nil, fmt.Errorf("failed to read sproto.yaml within zip: %w", err)
+			}
+
+			sprotoConfig, err := config.ParseConfigBytes(configBytes)
+			if err != nil {
+				// Log the parsing error but don't necessarily fail the whole publish yet
+				log.Printf("Warning: Found sproto.yaml but failed to parse: %v", err)
+				// Return the parsing error so the caller knows validation failed
+				return nil, fmt.Errorf("failed to parse sproto.yaml: %w", err)
+			}
+			log.Printf("Successfully parsed sproto.yaml from artifact")
+			return sprotoConfig, nil // Found and parsed successfully
+		}
+	}
+
+	return nil, errors.New("sproto.yaml not found in the root of the artifact zip") // Not found
+}
+
+// storeDependencies saves the dependency relationships defined in sproto.yaml to the database.
+// It operates within the provided database transaction.
+func storeDependencies(tx *gorm.DB, dependentModuleID uuid.UUID, dependencies []config.Dependency) error {
+	if len(dependencies) == 0 {
+		return nil // Nothing to store
+	}
+	log.Printf("Storing %d dependencies for module ID %s", len(dependencies), dependentModuleID)
+
+	for i, dep := range dependencies {
+		// 1. Find the required module by namespace and name
+		var requiredModule models.Module
+		result := tx.Where("namespace = ? AND name = ?", dep.Namespace, dep.Name).First(&requiredModule)
+
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			// Dependency module not found in the registry
+			return fmt.Errorf("dependency %d (%s/%s) not found in registry", i+1, dep.Namespace, dep.Name)
+		} else if result.Error != nil {
+			// Other database error finding the dependency
+			log.Printf("Error finding dependency module %s/%s: %v", dep.Namespace, dep.Name, result.Error)
+			return fmt.Errorf("database error finding dependency %d (%s/%s): %w", i+1, dep.Namespace, dep.Name, result.Error)
+		}
+
+		// 2. Validate version constraint syntax (already done in config parsing, but double-check)
+		_, err := semver.NewConstraint(dep.Version)
+		if err != nil {
+			return fmt.Errorf("dependency %d (%s/%s) has invalid version constraint '%s': %w", i+1, dep.Namespace, dep.Name, dep.Version, err)
+		}
+
+		// 3. Create the ModuleDependency record
+		moduleDep := models.ModuleDependency{
+			DependentModuleID: dependentModuleID,
+			RequiredModuleID:  requiredModule.ID,
+			VersionConstraint: dep.Version,
+			// CreatedAt/UpdatedAt set by default
+		}
+
+		err = tx.Create(&moduleDep).Error
+		// Handle potential unique constraint violation (uq_dependency) gracefully if needed,
+		// though duplicates should ideally be caught by config validation first.
+		if err != nil {
+			log.Printf("Error creating dependency record (%s/%s -> %s/%s): %v",
+				moduleDep.DependentModuleID, // Assuming we can get namespace/name easily later
+				moduleDep.RequiredModuleID,
+				dep.Namespace, dep.Name, err)
+			return fmt.Errorf("failed to save dependency %d (%s/%s): %w", i+1, dep.Namespace, dep.Name, err)
+		}
+		log.Printf("Successfully stored dependency: %s -> %s/%s (%s)", dependentModuleID, dep.Namespace, dep.Name, dep.Version)
+	}
+	return nil
+}
 
 // ListModulesResponse defines the structure for the list modules endpoint.
 type ListModulesResponse struct {
@@ -35,9 +127,10 @@ type ListModulesResponse struct {
 
 // ModuleInfo contains details for a single module in the list response.
 type ModuleInfo struct {
-	Namespace     string `json:"namespace"`
-	Name          string `json:"name"`
-	LatestVersion string `json:"latest_version"` // Based on creation time for now
+	Namespace     string  `json:"namespace"`
+	Name          string  `json:"name"`
+	ImportPath    *string `json:"import_path,omitempty"` // Added import path
+	LatestVersion string  `json:"latest_version"`        // Based on creation time for now
 }
 
 // ListModulesHandler handles requests to list all registered modules.
@@ -58,6 +151,7 @@ func ListModulesHandler(w http.ResponseWriter, r *http.Request) {
 		SELECT
 			m.namespace,
 			m.name,
+			m.import_path, -- Added import path
 			COALESCE(lv.version, '') AS latest_version
 		FROM modules m
 		LEFT JOIN LatestVersions lv ON m.id = lv.module_id AND lv.rn = 1
@@ -229,11 +323,13 @@ func FetchModuleVersionArtifactHandler(w http.ResponseWriter, r *http.Request) {
 
 // PublishModuleVersionResponse defines the successful response structure.
 type PublishModuleVersionResponse struct {
-	Namespace      string    `json:"namespace"`
-	ModuleName     string    `json:"module_name"`
-	Version        string    `json:"version"`
-	ArtifactDigest string    `json:"artifact_digest"` // sha256:<hex_digest>
-	CreatedAt      time.Time `json:"created_at"`
+	Namespace      string               `json:"namespace"`
+	ModuleName     string               `json:"module_name"`
+	Version        string               `json:"version"`
+	ImportPath     *string              `json:"import_path,omitempty"` // Added import path
+	ArtifactDigest string               `json:"artifact_digest"`       // sha256:<hex_digest>
+	CreatedAt      time.Time            `json:"created_at"`
+	Dependencies   []DependencyResponse `json:"dependencies,omitempty"` // Added dependencies list
 }
 
 // PublishModuleVersionHandler handles requests to publish a new module version.
@@ -287,23 +383,52 @@ func PublishModuleVersionHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer file.Close()
-
 	log.Printf("Received artifact file: %s, Size: %d", header.Filename, header.Size)
 
-	// Calculate SHA256 digest while reading the file for upload
+	// --- File Handling: Temp File, Hashing, Zip Inspection ---
+	// Create a temporary file to store the upload
+	tempFile, err := os.CreateTemp("", "sproto-artifact-*.zip")
+	if err != nil {
+		log.Printf("Error creating temporary file: %v", err)
+		response.Error(w, http.StatusInternalServerError, "Failed to process artifact file")
+		return
+	}
+	defer os.Remove(tempFile.Name()) // Clean up the temp file afterwards
+	defer tempFile.Close()           // Close the file handle
+
+	// Calculate SHA256 digest while copying to the temporary file
 	hasher := sha256.New()
-	// Use io.TeeReader to write to hasher while reading for upload
-	teeReader := io.TeeReader(file, hasher)
+	multiWriter := io.MultiWriter(tempFile, hasher)
+	writtenBytes, err := io.Copy(multiWriter, file)
+	if err != nil {
+		log.Printf("Error writing artifact to temporary file: %v", err)
+		response.Error(w, http.StatusInternalServerError, "Failed to process artifact file")
+		return
+	}
+	if writtenBytes != header.Size {
+		log.Printf("Warning: Size mismatch writing artifact (expected %d, wrote %d)", header.Size, writtenBytes)
+		// Potentially return an error here depending on strictness
+	}
+	artifactDigestHex := hex.EncodeToString(hasher.Sum(nil))
+	tempFilePath := tempFile.Name()
+	tempFile.Close() // Close after writing
+
+	// Attempt to extract sproto.yaml config from the temp zip file
+	sprotoConfig, err := extractConfigFromZip(tempFilePath)
+	if err != nil {
+		// Log the error but treat it as non-fatal for now (allow publishing without sproto.yaml)
+		log.Printf("Warning: Could not extract or parse sproto.yaml from artifact: %v", err)
+		// Set sprotoConfig to nil to indicate it wasn't successfully parsed
+		sprotoConfig = nil
+		err = nil // Reset error so we don't fail the publish
+	}
 
 	// --- Database and Storage Operations (Transaction) ---
 	gormDB := db.GetDB()
 	storageProvider := storage.GetStorageProvider() // Get the initialized provider
-	// cfg, _ := config.LoadConfig() // Config likely not needed directly here anymore
-	// bucketName := cfg.MinioBucket // Bucket name is handled within the provider
 
 	var module models.Module
 	var moduleVersion models.ModuleVersion
-	var artifactDigestHex string
 	var storageKey string
 
 	// Start transaction
@@ -324,13 +449,52 @@ func PublishModuleVersionHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	// 1. Find or Create Module
-	err = tx.Where(models.Module{Namespace: namespace, Name: moduleName}).
-		Attrs(models.Module{Namespace: namespace, Name: moduleName}). // Set attributes if creating
-		FirstOrCreate(&module).Error
+	// 1. Find or Create Module, potentially updating ImportPath
+	err = tx.Where("namespace = ? AND name = ?", namespace, moduleName).First(&module).Error
+	isNewModule := false
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		// Module doesn't exist, create it
+		isNewModule = true
+		module = models.Module{
+			Namespace: namespace,
+			Name:      moduleName,
+			// Set ImportPath only if sprotoConfig is valid and parsed
+			ImportPath: nil, // Default to nil
+		}
+		if sprotoConfig != nil {
+			// Validate config name matches path params
+			if sprotoConfig.Name != fmt.Sprintf("%s/%s", namespace, moduleName) {
+				err = fmt.Errorf("module name in sproto.yaml ('%s') does not match URL path ('%s/%s')", sprotoConfig.Name, namespace, moduleName)
+				log.Println(err.Error())
+				response.Error(w, http.StatusBadRequest, err.Error())
+				return // Triggers rollback
+			}
+			module.ImportPath = &sprotoConfig.ImportPath // Assign parsed import path
+		}
+		err = tx.Create(&module).Error
+	} else if err == nil {
+		// Module exists, check if we should update ImportPath
+		if module.ImportPath == nil && sprotoConfig != nil {
+			// Validate config name matches path params
+			if sprotoConfig.Name != fmt.Sprintf("%s/%s", namespace, moduleName) {
+				err = fmt.Errorf("module name in sproto.yaml ('%s') does not match URL path ('%s/%s')", sprotoConfig.Name, namespace, moduleName)
+				log.Println(err.Error())
+				response.Error(w, http.StatusBadRequest, err.Error())
+				return // Triggers rollback
+			}
+			// Only update if current path is nil and we have a valid new one
+			log.Printf("Updating existing module %s/%s with import path from sproto.yaml: %s", namespace, moduleName, sprotoConfig.ImportPath)
+			err = tx.Model(&module).Update("import_path", sprotoConfig.ImportPath).Error
+		} else if module.ImportPath != nil && sprotoConfig != nil && *module.ImportPath != sprotoConfig.ImportPath {
+			// Existing path differs from config path - log warning, don't update automatically
+			log.Printf("Warning: Module %s/%s already has import path '%s'. Ignoring different path '%s' from sproto.yaml.",
+				namespace, moduleName, *module.ImportPath, sprotoConfig.ImportPath)
+		}
+	}
+	// Handle potential errors from create/update
 	if err != nil {
-		log.Printf("Error finding or creating module %s/%s: %v", namespace, moduleName, err)
-		response.Error(w, http.StatusInternalServerError, "Database error during module lookup/creation")
+		log.Printf("Error finding/creating/updating module %s/%s: %v", namespace, moduleName, err)
+		response.Error(w, http.StatusInternalServerError, "Database error during module operation")
 		return // Triggers deferred rollback
 	}
 
@@ -351,20 +515,26 @@ func PublishModuleVersionHandler(w http.ResponseWriter, r *http.Request) {
 	// Reset err as ErrRecordNotFound is expected if version doesn't exist
 	err = nil
 
-	// 3. Upload to Storage Provider (using the TeeReader)
+	// 3. Upload to Storage Provider (reading from the temp file)
 	storageKey = fmt.Sprintf("modules/%s/%s/protos.zip", module.ID.String(), versionStr) // Define storage key structure
-	err = storageProvider.UploadFile(r.Context(), storageKey, teeReader, header.Size, "application/zip")
+	tempFileReader, err := os.Open(tempFilePath)
+	if err != nil {
+		log.Printf("Error reopening temporary file for upload %s: %v", tempFilePath, err)
+		response.Error(w, http.StatusInternalServerError, "Failed to process artifact file for upload")
+		return // Triggers rollback
+	}
+	defer tempFileReader.Close()
+
+	err = storageProvider.UploadFile(r.Context(), storageKey, tempFileReader, header.Size, "application/zip")
 	if err != nil {
 		log.Printf("Error uploading artifact to storage (Key: %s): %v", storageKey, err)
 		response.Error(w, http.StatusInternalServerError, "Failed to upload artifact to storage")
 		return // Triggers deferred rollback
 	}
 	log.Printf("Successfully uploaded %s (Key: %s, Size: %d)", header.Filename, storageKey, header.Size)
+	tempFileReader.Close() // Close reader after upload
 
-	// 4. Get the final digest
-	artifactDigestHex = hex.EncodeToString(hasher.Sum(nil))
-
-	// 5. Create ModuleVersion record
+	// 4. Create ModuleVersion record (digest already calculated)
 	moduleVersion = models.ModuleVersion{
 		ModuleID:           module.ID,
 		Version:            versionStr,
@@ -380,15 +550,28 @@ func PublishModuleVersionHandler(w http.ResponseWriter, r *http.Request) {
 		return // Triggers deferred rollback
 	}
 
-	// 6. Explicitly update the parent module's updated_at timestamp
-	err = tx.Model(&module).Update("updated_at", time.Now()).Error
-	if err != nil {
-		// Log the error but don't fail the whole operation just for the timestamp update
-		log.Printf("Warning: Failed to update module %s/%s updated_at timestamp: %v", namespace, moduleName, err)
-		err = nil // Reset error so commit doesn't rollback
+	// 6. Store Dependencies if sproto.yaml was parsed successfully
+	if sprotoConfig != nil && len(sprotoConfig.Dependencies) > 0 {
+		err = storeDependencies(tx, module.ID, sprotoConfig.Dependencies)
+		if err != nil {
+			// storeDependencies already logs details
+			// Return specific error message from storeDependencies
+			response.Error(w, http.StatusBadRequest, fmt.Sprintf("Failed to store module dependencies: %v", err)) // Use Bad Request as it's likely a missing dep
+			return                                                                                                // Triggers rollback
+		}
 	}
 
-	// 7. Commit Transaction
+	// 7. Explicitly update the parent module's updated_at timestamp (only if needed)
+	if isNewModule || moduleVersion.CreatedAt.After(module.UpdatedAt) { // Update if new module or new version is latest
+		err = tx.Model(&module).Update("updated_at", moduleVersion.CreatedAt).Error // Use version creation time
+		if err != nil {
+			// Log the error but don't fail the whole operation just for the timestamp update
+			log.Printf("Warning: Failed to update module %s/%s updated_at timestamp: %v", namespace, moduleName, err)
+			err = nil // Reset error so commit doesn't rollback
+		}
+	}
+
+	// 8. Commit Transaction
 	err = tx.Commit().Error
 	if err != nil {
 		log.Printf("Error committing transaction for %s/%s@%s: %v", namespace, moduleName, versionStr, err)
@@ -397,14 +580,255 @@ func PublishModuleVersionHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// --- Success Response ---
+	// Fetch stored dependencies to include in the response
+	storedDeps, fetchErr := models.GetDependenciesForModule(gormDB, module.ID) // Use the non-transactional DB reader
+	if fetchErr != nil {
+		// Log the error but don't fail the response just because we couldn't fetch deps for it
+		log.Printf("Warning: Failed to fetch stored dependencies for response for module %s: %v", module.ID, fetchErr)
+	}
+	respDeps := make([]DependencyResponse, 0, len(storedDeps))
+	// Need to fetch details for each required module to populate DependencyResponse fully
+	for _, sd := range storedDeps {
+		var reqMod models.Module
+		// This could be optimized by fetching all required modules in one query beforehand
+		if res := gormDB.First(&reqMod, sd.RequiredModuleID); res.Error == nil {
+			respDeps = append(respDeps, DependencyResponse{
+				Namespace:         reqMod.Namespace,
+				Name:              reqMod.Name,
+				ImportPath:        reqMod.FullImportPath(), // Use helper method
+				VersionConstraint: sd.VersionConstraint,
+			})
+		} else {
+			log.Printf("Warning: Could not fetch details for required module %s for response: %v", sd.RequiredModuleID, res.Error)
+		}
+	}
+
 	respData := PublishModuleVersionResponse{
 		Namespace:      namespace,
 		ModuleName:     moduleName,
 		Version:        versionStr,
+		ImportPath:     module.ImportPath,             // Include import path in response
 		ArtifactDigest: "sha256:" + artifactDigestHex, // Add prefix for clarity
 		CreatedAt:      moduleVersion.CreatedAt,       // Use the timestamp from the created record
+		Dependencies:   respDeps,                      // Include dependencies
 	}
 	response.JSON(w, http.StatusCreated, respData)
+}
+
+// --- Dependency Handlers ---
+
+// DependencyResponse defines the structure for a single dependency in API responses.
+type DependencyResponse struct {
+	Namespace         string `json:"namespace"`
+	Name              string `json:"name"`
+	ImportPath        string `json:"import_path,omitempty"` // Import path of the required module
+	VersionConstraint string `json:"version_constraint"`
+}
+
+// ListModuleDependenciesResponse defines the structure for the list module dependencies endpoint.
+type ListModuleDependenciesResponse struct {
+	Namespace    string               `json:"namespace"`
+	ModuleName   string               `json:"module_name"`
+	Dependencies []DependencyResponse `json:"dependencies"`
+}
+
+// HandleListModuleDependencies handles requests to list dependencies for a specific module.
+// GET /api/v1/modules/{namespace}/{module_name}/dependencies
+func HandleListModuleDependencies(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	namespace := vars["namespace"]
+	moduleName := vars["module_name"]
+
+	if namespace == "" || moduleName == "" {
+		response.Error(w, http.StatusBadRequest, "Namespace and module name are required")
+		return
+	}
+
+	gormDB := db.GetDB()
+	var module models.Module
+
+	// 1. Find the module
+	err := gormDB.Where("namespace = ? AND name = ?", namespace, moduleName).First(&module).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			log.Printf("Module not found for listing dependencies: %s/%s", namespace, moduleName)
+			response.Error(w, http.StatusNotFound, "Module not found")
+		} else {
+			log.Printf("Error finding module %s/%s for dependencies: %v", namespace, moduleName, err)
+			response.Error(w, http.StatusInternalServerError, "Failed to retrieve module")
+		}
+		return
+	}
+
+	// 2. Get dependencies for the module
+	// Use a struct to fetch required module details along with the dependency
+	type DependencyWithDetails struct {
+		models.ModuleDependency
+		RequiredNamespace  string  `gorm:"column:required_namespace"`
+		RequiredName       string  `gorm:"column:required_name"`
+		RequiredImportPath *string `gorm:"column:required_import_path"`
+	}
+	var dependenciesWithDetails []DependencyWithDetails
+
+	err = gormDB.Table("module_dependencies md").
+		Select("md.*, rm.namespace as required_namespace, rm.name as required_name, rm.import_path as required_import_path").
+		Joins("JOIN modules rm ON rm.id = md.required_module_id").
+		Where("md.dependent_module_id = ?", module.ID).
+		Order("required_namespace, required_name"). // Order for consistency
+		Scan(&dependenciesWithDetails).Error
+
+	if err != nil {
+		log.Printf("Error retrieving dependencies for module %s/%s (ID: %s): %v", namespace, moduleName, module.ID, err)
+		response.Error(w, http.StatusInternalServerError, "Failed to retrieve module dependencies")
+		return
+	}
+
+	// 3. Format the response
+	respDeps := make([]DependencyResponse, 0, len(dependenciesWithDetails))
+	for _, dep := range dependenciesWithDetails {
+		importPath := ""
+		if dep.RequiredImportPath != nil {
+			importPath = *dep.RequiredImportPath
+		}
+		respDeps = append(respDeps, DependencyResponse{
+			Namespace:         dep.RequiredNamespace,
+			Name:              dep.RequiredName,
+			ImportPath:        importPath,
+			VersionConstraint: dep.VersionConstraint,
+		})
+	}
+
+	respData := ListModuleDependenciesResponse{
+		Namespace:    namespace,
+		ModuleName:   moduleName,
+		Dependencies: respDeps,
+	}
+	if respDeps == nil {
+		respData.Dependencies = []DependencyResponse{} // Ensure empty array, not null
+	}
+
+	response.JSON(w, http.StatusOK, respData)
+}
+
+// HandleListModuleVersionDependencies - Placeholder as dependencies are currently module-level.
+// GET /api/v1/modules/{namespace}/{module_name}/{version}/dependencies
+// For now, this will return the same module-level dependencies regardless of version.
+func HandleListModuleVersionDependencies(w http.ResponseWriter, r *http.Request) {
+	// Implementation is identical to HandleListModuleDependencies for now,
+	// as the schema links dependencies to modules, not specific versions.
+	// We just need to validate the version exists before proceeding.
+	vars := mux.Vars(r)
+	namespace := vars["namespace"]
+	moduleName := vars["module_name"]
+	version := vars["version"]
+
+	if namespace == "" || moduleName == "" || version == "" {
+		response.Error(w, http.StatusBadRequest, "Namespace, module name, and version are required")
+		return
+	}
+
+	gormDB := db.GetDB()
+
+	// 1. Verify the module version exists first
+	var moduleVersion models.ModuleVersion
+	err := gormDB.Joins("JOIN modules ON modules.id = module_versions.module_id").
+		Where("modules.namespace = ? AND modules.name = ? AND module_versions.version = ?", namespace, moduleName, version).
+		Select("module_versions.module_id"). // Only need module_id
+		First(&moduleVersion).Error
+
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			log.Printf("Module version not found for listing dependencies: %s/%s@%s", namespace, moduleName, version)
+			response.Error(w, http.StatusNotFound, "Module version not found")
+		} else {
+			log.Printf("Error finding module version %s/%s@%s for dependencies: %v", namespace, moduleName, version, err)
+			response.Error(w, http.StatusInternalServerError, "Failed to retrieve module version details")
+		}
+		return
+	}
+
+	// 2. Get dependencies for the module (using the found module ID)
+	type DependencyWithDetails struct {
+		models.ModuleDependency
+		RequiredNamespace  string  `gorm:"column:required_namespace"`
+		RequiredName       string  `gorm:"column:required_name"`
+		RequiredImportPath *string `gorm:"column:required_import_path"`
+	}
+	var dependenciesWithDetails []DependencyWithDetails
+
+	err = gormDB.Table("module_dependencies md").
+		Select("md.*, rm.namespace as required_namespace, rm.name as required_name, rm.import_path as required_import_path").
+		Joins("JOIN modules rm ON rm.id = md.required_module_id").
+		Where("md.dependent_module_id = ?", moduleVersion.ModuleID). // Use module ID from the version check
+		Order("required_namespace, required_name").
+		Scan(&dependenciesWithDetails).Error
+
+	if err != nil {
+		log.Printf("Error retrieving dependencies for module version %s/%s@%s (ModuleID: %s): %v", namespace, moduleName, version, moduleVersion.ModuleID, err)
+		response.Error(w, http.StatusInternalServerError, "Failed to retrieve module dependencies")
+		return
+	}
+
+	// 3. Format the response (same as module-level)
+	respDeps := make([]DependencyResponse, 0, len(dependenciesWithDetails))
+	for _, dep := range dependenciesWithDetails {
+		importPath := ""
+		if dep.RequiredImportPath != nil {
+			importPath = *dep.RequiredImportPath
+		}
+		respDeps = append(respDeps, DependencyResponse{
+			Namespace:         dep.RequiredNamespace,
+			Name:              dep.RequiredName,
+			ImportPath:        importPath,
+			VersionConstraint: dep.VersionConstraint,
+		})
+	}
+
+	// Response struct is the same as module-level for now
+	respData := ListModuleDependenciesResponse{
+		Namespace:    namespace,
+		ModuleName:   moduleName,
+		Dependencies: respDeps,
+	}
+	if respDeps == nil {
+		respData.Dependencies = []DependencyResponse{}
+	}
+
+	response.JSON(w, http.StatusOK, respData)
+}
+
+// HandleResolveDependencies - Placeholder for dependency resolution logic (Phase 2/3).
+// GET /api/v1/resolve?module={namespace}/{module_name}&version={version} (Example query params)
+func HandleResolveDependencies(w http.ResponseWriter, r *http.Request) {
+	// TODO: Implement dependency resolution logic.
+	// This will involve:
+	// 1. Parsing module/version from query params.
+	// 2. Fetching the root module's dependencies.
+	// 3. Recursively fetching dependencies of dependencies.
+	// 4. Resolving version constraints using semver logic (e.g., finding the highest compatible version).
+	// 5. Detecting and handling conflicts or cycles.
+	// 6. Returning a flattened list of resolved dependencies (specific versions) and their import paths.
+	log.Println("Placeholder: HandleResolveDependencies called")
+	response.Error(w, http.StatusNotImplemented, "Dependency resolution endpoint not yet implemented")
+}
+
+// --- Structs for Dependency Resolution Response (Placeholder) ---
+
+// DependencyResolutionResponse defines the structure for the dependency resolution endpoint.
+type DependencyResolutionResponse struct {
+	Root         ModuleVersionInfo   `json:"root"`
+	Dependencies []ModuleVersionInfo `json:"dependencies"`     // Flattened list of resolved dependencies
+	ImportPaths  map[string]string   `json:"import_paths"`     // Maps import paths to module versions (e.g., "github.com/org/mod/proto" -> "org/mod@v1.2.3")
+	Errors       []string            `json:"errors,omitempty"` // Any resolution errors encountered
+}
+
+// ModuleVersionInfo contains details for a specific resolved module version.
+type ModuleVersionInfo struct {
+	Namespace  string `json:"namespace"`
+	Name       string `json:"name"`
+	Version    string `json:"version"`
+	ImportPath string `json:"import_path,omitempty"`
+	// Could add Digest here if needed for fetching artifacts
 }
 
 // Helper function for semantic version sorting

@@ -3,7 +3,7 @@
 #### Task 2.1: Create Import Path Parser
 - **2.1.1**: Implement Proto file import scanner
   - **Assignee**: Cline
-  - **Status**: TODO
+  - **Status**: DONE
   - **Details**: 
     - Create a new package `internal/proto` for Proto-specific utilities
     - Implement a scanner that extracts import statements from .proto files using `github.com/jhump/protoreflect/desc/protoparse`:
@@ -36,7 +36,7 @@
 
 - **2.1.2**: Create import path normalization logic
   - **Assignee**: Cline
-  - **Status**: TODO
+  - **Status**: DONE
   - **Details**: 
     - Implement a path normalizer that converts various import path formats to a standard canonical form:
       ```go
@@ -63,7 +63,7 @@
 
 - **2.1.3**: Add tests for import path parsing
   - **Assignee**: Cline
-  - **Status**: TODO
+  - **Status**: DONE
   - **Details**: 
     - Create a comprehensive test suite in `internal/proto/scanner_test.go` with test cases for:
       - Valid .proto files with:
@@ -92,7 +92,7 @@
 #### Task 2.2: Implement Dependency Graph Resolver
 - **2.2.1**: Create dependency graph data structure
   - **Assignee**: Cline
-  - **Status**: TODO
+  - **Status**: DONE
   - **Details**: 
     - Create a new package `internal/resolver` for dependency resolution logic
     - Define a dependency graph struct using `github.com/heimdalr/dag`:
@@ -143,7 +143,7 @@
 
 - **2.2.2**: Implement graph traversal algorithm
   - **Assignee**: Cline
-  - **Status**: TODO
+  - **Status**: DONE
   - **Details**: 
     - Implement dependency resolution algorithms:
       ```go
@@ -170,7 +170,7 @@
 
 - **2.2.3**: Handle circular dependency detection
   - **Assignee**: Cline
-  - **Status**: TODO
+  - **Status**: DONE
   - **Details**: 
     - Leverage `github.com/heimdalr/dag`'s built-in cycle detection:
       ```go
@@ -196,7 +196,7 @@
 
 - **2.2.4**: Write tests for dependency resolution
   - **Assignee**: Cline
-  - **Status**: TODO
+  - **Status**: DONE
   - **Details**: 
     - Create a comprehensive test suite in `internal/resolver/resolver_test.go` with:
       - Simple dependency trees with clear resolution order
@@ -229,7 +229,7 @@
 #### Task 2.3: Implement Import Path Mapping System
 - **2.3.1**: Create import path to module mapper
   - **Assignee**: Cline
-  - **Status**: TODO
+  - **Status**: DONE
   - **Details**: 
     - Create a new package `internal/mapper` for import path mapping logic
     - Define a data structure to store the mapping between import path prefixes and module identifiers:
@@ -267,7 +267,7 @@
 
 - **2.3.2**: Implement best-match algorithm for import paths
   - **Assignee**: Cline
-  - **Status**: TODO
+  - **Status**: DONE
   - **Details**: 
     - Implement the core mapping function using the prefix tree:
       ```go
@@ -286,7 +286,7 @@
 
 - **2.3.3**: Add registry lookup integration
   - **Assignee**: Cline
-  - **Status**: TODO
+  - **Status**: DONE
   - **Details**: 
     - Integrate the mapper with the registry client (`internal/cli/client.go` or similar)
     - Implement functions to fetch module information (including import paths) from the registry:

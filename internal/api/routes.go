@@ -22,6 +22,16 @@ func RegisterRoutes(router *mux.Router, authToken string) {
 	// Fetch Module Version Artifact: GET /api/v1/modules/{namespace}/{module_name}/{version}/artifact
 	apiV1.HandleFunc("/modules/{namespace}/{module_name}/{version}/artifact", FetchModuleVersionArtifactHandler).Methods("GET")
 
+	// List Module Dependencies: GET /api/v1/modules/{namespace}/{module_name}/dependencies
+	apiV1.HandleFunc("/modules/{namespace}/{module_name}/dependencies", HandleListModuleDependencies).Methods("GET")
+
+	// List Module Version Dependencies: GET /api/v1/modules/{namespace}/{module_name}/{version}/dependencies
+	// Note: Currently returns module-level dependencies, but validates version exists.
+	apiV1.HandleFunc("/modules/{namespace}/{module_name}/{version}/dependencies", HandleListModuleVersionDependencies).Methods("GET")
+
+	// Resolve Dependencies (Placeholder): GET /api/v1/resolve?module=...&version=...
+	apiV1.HandleFunc("/resolve", HandleResolveDependencies).Methods("GET") // Query params handled in handler
+
 	// --- Protected Routes (Auth Required) ---
 
 	// Publish Module Version: POST /api/v1/modules/{namespace}/{module_name}/{version}

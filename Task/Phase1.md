@@ -4,7 +4,7 @@
 #### Task 1.1: Design and Implement Configuration Format
 - **1.1.1**: Design `sproto.yaml` format specification
   - **Assignee**: Cline
-  - **Status**: TODO
+  - **Status**: DONE
   - **Details**: 
     - Create a detailed specification for the `sproto.yaml` file format that will be backward compatible with existing SProto functionality
     - Define required fields:
@@ -28,7 +28,7 @@
   
 - **1.1.2**: Implement configuration parser
   - **Assignee**: Cline
-  - **Status**: TODO
+  - **Status**: DONE
   - **Details**: 
     - Create Go structs that map to the YAML configuration format:
       ```go
@@ -59,7 +59,7 @@
   
 - **1.1.3**: Write validation logic for configuration files
   - **Assignee**: Cline
-  - **Status**: TODO
+  - **Status**: DONE
   - **Details**: 
     - Create a validation function `func (c *SProtoConfig) Validate() error` that checks:
       - Version is specified and supported (e.g., "v1")
@@ -90,7 +90,7 @@
 #### Task 1.2: Update Database Schema
 - **1.2.1**: Extend Module model to include import path
   - **Assignee**: Cline
-  - **Status**: TODO
+  - **Status**: DONE
   - **Details**: 
     - Update the Module struct in `internal/models/models.go` to include an import path field:
       ```go
@@ -122,7 +122,7 @@
 
 - **1.2.2**: Create ModuleDependency model
   - **Assignee**: Cline
-  - **Status**: TODO
+  - **Status**: DONE
   - **Details**: 
     - Define a new ModuleDependency struct in `internal/models/models.go` to model dependency relationships:
       ```go
@@ -157,7 +157,7 @@
 
 - **1.2.3**: Implement database migration
   - **Assignee**: Cline
-  - **Status**: TODO
+  - **Status**: DONE
   - **Details**: 
     - Create a new SQL migration file in `sql/002_add_dependency_management.sql` with:
       ```sql
@@ -202,7 +202,7 @@
 #### Task 1.3: Update API Handlers for New Schema
 - **1.3.1**: Update module creation handler
   - **Assignee**: Cline
-  - **Status**: TODO
+  - **Status**: DONE
   - **Details**: 
     - Modify the publish module version handler in `internal/api/handlers.go` to accept and process import path data:
       ```go
@@ -236,7 +236,7 @@
 
 - **1.3.2**: Implement dependency relationship handling
   - **Assignee**: Cline
-  - **Status**: TODO
+  - **Status**: DONE
   - **Details**: 
     - Create new API endpoints for dependency management:
       - `GET /api/v1/modules/{namespace}/{module_name}/dependencies` - List dependencies
@@ -283,7 +283,7 @@
 
 - **1.3.3**: Update API response structs to include new fields
   - **Assignee**: Cline
-  - **Status**: TODO
+  - **Status**: DONE
   - **Details**: 
     - Modify response structs in `internal/api/response/response.go` to include new fields:
       ```go
