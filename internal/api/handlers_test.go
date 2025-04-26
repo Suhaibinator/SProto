@@ -13,9 +13,11 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/Suhaibinator/SProto/internal/db" // Import db package
+
 	// Keep storage import
 	"github.com/google/uuid" // For generating UUIDs in tests
 	"github.com/gorilla/mux" // For setting URL vars
+
 	// Keep minio import
 	"github.com/stretchr/testify/assert" // Use testify/assert
 
@@ -85,6 +87,7 @@ func TestListModulesHandler_Success(t *testing.T) {
 		SELECT
 			m.namespace,
 			m.name,
+			m.import_path, -- Added import path
 			COALESCE(lv.version, '') AS latest_version
 		FROM modules m
 		LEFT JOIN LatestVersions lv ON m.id = lv.module_id AND lv.rn = 1
@@ -137,6 +140,7 @@ func TestListModulesHandler_DBError(t *testing.T) {
 		SELECT
 			m.namespace,
 			m.name,
+			m.import_path, -- Added import path
 			COALESCE(lv.version, '') AS latest_version
 		FROM modules m
 		LEFT JOIN LatestVersions lv ON m.id = lv.module_id AND lv.rn = 1

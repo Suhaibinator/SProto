@@ -60,7 +60,8 @@ func Init(cfg config.Config) (*gorm.DB, error) { // Updated signature
 
 	// Run migrations
 	log.Println("Running database migrations...")
-	err = DB.AutoMigrate(&models.Module{}, &models.ModuleVersion{})
+	// Add ModuleDependency to the list of models to migrate
+	err = DB.AutoMigrate(&models.Module{}, &models.ModuleVersion{}, &models.ModuleDependency{})
 	if err != nil {
 		log.Printf("Failed to migrate database (%s): %v", dbType, err)
 		return nil, fmt.Errorf("failed to migrate database (%s): %w", dbType, err)

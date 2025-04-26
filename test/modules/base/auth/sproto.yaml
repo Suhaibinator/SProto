@@ -1,0 +1,3 @@
+version: v1
+name: test/auth
+import_path: github.com/test/auth/proto

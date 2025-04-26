@@ -1,0 +1,18 @@
+version: v1
+name: test/resolve-test-project
+import_path: github.com/test/resolve-test-project/proto
+
+# This project has both direct and transitive dependencies:
+# - Direct dependency on test/common with exact version (v1.0.0)
+# - Direct dependency on test/service with a range (>=v1.0.0, <v2.0.0)
+# - Transitive dependency on test/auth through test/service
+
+dependencies:
+  - namespace: test
+    name: common
+    version: "v1.0.0"
+    import_path: github.com/test/common/proto
+  - namespace: test 
+    name: service
+    version: ">=v1.0.0, <v2.0.0"
+    import_path: github.com/test/service/proto

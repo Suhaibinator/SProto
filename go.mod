@@ -6,7 +6,9 @@ require (
 	github.com/Masterminds/semver/v3 v3.3.1
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/mux v1.8.1
-	github.com/minio/minio-go/v7 v7.0.90
+	github.com/heimdalr/dag v1.5.0
+	github.com/jhump/protoreflect v1.17.0
+	github.com/minio/minio-go/v7 v7.0.91
 	github.com/mitchellh/go-homedir v1.1.0
 	github.com/spf13/cobra v1.9.1
 	github.com/spf13/viper v1.20.1
@@ -16,7 +18,20 @@ require (
 )
 
 require (
-	github.com/mattn/go-sqlite3 v1.14.22 // indirect
+	github.com/VividCortex/ewma v1.2.0 // indirect
+	github.com/acarl005/stripansi v0.0.0-20180116102854-5a71ef0e047d // indirect
+	github.com/bufbuild/protocompile v0.14.1 // indirect
+	github.com/emirpasic/gods v1.18.1 // indirect
+	github.com/golang/protobuf v1.5.4 // indirect
+	github.com/mattn/go-runewidth v0.0.16 // indirect
+	github.com/rivo/uniseg v0.4.7 // indirect
+	github.com/stretchr/objx v0.5.2 // indirect
+	github.com/vbauerster/mpb/v8 v8.9.3 // indirect
+	google.golang.org/protobuf v1.36.6 // indirect
+)
+
+require (
+	github.com/mattn/go-sqlite3 v1.14.28 // indirect
 	gorm.io/driver/sqlite v1.5.7
 )
 
@@ -55,5 +70,5 @@ require (
 	golang.org/x/sync v0.13.0 // indirect
 	golang.org/x/sys v0.32.0 // indirect
 	golang.org/x/text v0.24.0 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
+	gopkg.in/yaml.v3 v3.0.1
 )

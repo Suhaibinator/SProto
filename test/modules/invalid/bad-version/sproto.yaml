@@ -1,0 +1,10 @@
+version: v1
+name: test/bad-version
+import_path: github.com/test/bad-version/proto
+
+# This module has an invalid version constraint
+dependencies:
+  - namespace: test
+    name: common
+    version: "garbage-version"
+    import_path: github.com/test/common/proto

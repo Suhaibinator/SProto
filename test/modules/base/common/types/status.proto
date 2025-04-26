@@ -1,0 +1,59 @@
+syntax = "proto3";
+
+package test.common.types;
+
+option go_package = "github.com/test/common/proto/types";
+
+// Standard status codes that can be used in API responses
+enum StatusCode {
+  // Not set, should never be used.
+  STATUS_CODE_UNSPECIFIED = 0;
+  
+  // The operation completed successfully.
+  OK = 1;
+  
+  // The operation was cancelled, usually due to a timeout.
+  CANCELLED = 2;
+  
+  // Required information was missing from the request.
+  INVALID_ARGUMENT = 3;
+  
+  // The requested resource could not be found.
+  NOT_FOUND = 4;
+  
+  // The requested resource already exists.
+  ALREADY_EXISTS = 5;
+  
+  // The caller does not have permission to execute the operation.
+  PERMISSION_DENIED = 6;
+  
+  // The service is currently unavailable.
+  UNAVAILABLE = 7;
+  
+  // An internal error occurred in the service.
+  INTERNAL = 8;
+}
+
+// Status represents an error status from an API call.
+message Status {
+  // The status code of the operation.
+  StatusCode code = 1;
+  
+  // A developer-facing error message.
+  string message = 2;
+  
+  // Additional details about the error.
+  repeated ErrorDetail details = 3;
+}
+
+// ErrorDetail represents a specific error detail.
+message ErrorDetail {
+  // Machine-readable error code.
+  string code = 1;
+  
+  // Human-readable error message.
+  string message = 2;
+  
+  // Additional structured error information.
+  map<string, string> metadata = 3;
+}

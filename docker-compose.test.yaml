@@ -1,0 +1,80 @@
+services:
+  postgres-test:
+    image: postgres:17
+    container_name: sproto_postgres_test
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres_test
+      POSTGRES_DB: sproto_test
+    volumes:
+      - postgres_test_data:/var/lib/postgresql/data
+      - ./sql:/docker-entrypoint-initdb.d # Mount SQL scripts for initialization
+    ports:
+      - "5432" # Don't expose port to host, only to internal network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d sproto_test"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - sproto_test_network
+
+  minio-test:
+    image: minio/minio:latest
+    container_name: sproto_minio_test
+    environment:
+      MINIO_ROOT_USER: miniotestadmin
+      MINIO_ROOT_PASSWORD: miniotestadmin
+    volumes:
+      - minio_test_data:/data
+    ports:
+      - "9090" # Don't expose port to host, only to internal network
+    command: server /data --console-address ":9090"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    networks:
+      - sproto_test_network
+
+  registry-server-test:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sproto_registry_server_test
+    ports:
+      - "8081:8080" # Map to a different host port (8081) to avoid conflicts
+    environment:
+      PROTOREG_SERVER_PORT: 8080
+      PROTOREG_DB_DSN: "host=postgres-test user=postgres password=postgres_test dbname=sproto_test port=5432 sslmode=disable"
+      PROTOREG_MINIO_ENDPOINT: "minio-test:9000"
+      PROTOREG_MINIO_ACCESS_KEY: miniotestadmin
+      PROTOREG_MINIO_SECRET_KEY: miniotestadmin
+      PROTOREG_MINIO_BUCKET: sproto-test-artifacts
+      PROTOREG_MINIO_USE_SSL: "false"
+      PROTOREG_AUTH_TOKEN: "test-token"
+      # Additional environment variables for testing
+      PROTOREG_TEST_MODE: "true"
+      PROTOREG_LOG_LEVEL: "debug"
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+      minio-test:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - sproto_test_network
+
+volumes:
+  postgres_test_data:
+    name: sproto_test_postgres_data # Named volume to avoid conflicts
+  minio_test_data:
+    name: sproto_test_minio_data # Named volume to avoid conflicts
+
+networks:
+  sproto_test_network:
+    name: sproto_test_network
+    driver: bridge

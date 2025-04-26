@@ -1,0 +1,13 @@
+version: v1
+name: test/service
+import_path: github.com/test/service/proto
+
+dependencies:
+  - namespace: test
+    name: common
+    version: "v1.0.0"
+    import_path: github.com/test/common/proto
+  - namespace: test
+    name: auth
+    version: ">=v1.0.0, <v2.0.0"
+    import_path: github.com/test/auth/proto

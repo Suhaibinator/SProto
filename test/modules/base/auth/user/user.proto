@@ -1,0 +1,77 @@
+syntax = "proto3";
+
+package test.auth.user;
+
+option go_package = "github.com/test/auth/proto/user";
+
+// UserRole defines the possible roles of a user in the system.
+enum UserRole {
+  // Default value when no role is specified.
+  USER_ROLE_UNSPECIFIED = 0;
+  
+  // Standard user with basic permissions.
+  USER = 1;
+  
+  // Administrator with elevated permissions.
+  ADMIN = 2;
+  
+  // Read-only user with limited permissions.
+  READONLY = 3;
+}
+
+// User represents a user in the system.
+message User {
+  // Unique identifier for the user.
+  string id = 1;
+  
+  // Email address of the user.
+  string email = 2;
+  
+  // Display name of the user.
+  string display_name = 3;
+  
+  // Role of the user.
+  UserRole role = 4;
+  
+  // Whether the user account is enabled.
+  bool enabled = 5;
+  
+  // Unix timestamp when the user was created.
+  int64 created_at = 6;
+  
+  // Unix timestamp when the user was last updated.
+  int64 updated_at = 7;
+}
+
+// CreateUserRequest is the request to create a new user.
+message CreateUserRequest {
+  // Email address of the new user.
+  string email = 1;
+  
+  // Display name of the new user.
+  string display_name = 2;
+  
+  // Password for the new user.
+  string password = 3;
+  
+  // Role of the new user.
+  UserRole role = 4;
+}
+
+// CreateUserResponse is the response to a CreateUserRequest.
+message CreateUserResponse {
+  // The created user.
+  User user = 1;
+}
+
+// GetUserRequest is the request to get a user.
+message GetUserRequest {
+  // ID of the user to get.
+  string id = 1;
+}
+
+// GetUserResponse is the response to a GetUserRequest.
+message GetUserResponse {
+  // The requested user.
+  User user = 1;
+}
