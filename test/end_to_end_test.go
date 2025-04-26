@@ -2,10 +2,10 @@ package test
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -153,14 +153,13 @@ func ensureTestEnvRunning(t *testing.T) {
 	}
 
 	// Start test environment if it's not already running
-	cmd := exec.CommandContext(context.Background(), scriptPath, "status")
-	cmd.Dir = ".." // Run from project root
+	// Use absolute path with the shell to ensure script is executed correctly
+	cmd := exec.CommandContext(context.Background(), "bash", "../"+scriptPath, "status")
 	output, err := cmd.CombinedOutput()
 
 	if err != nil || !containsRunning(string(output)) {
 		t.Log("Starting test environment...")
-		startCmd := exec.Command(scriptPath, "start")
-		startCmd.Dir = ".." // Run from project root
+		startCmd := exec.Command("bash", "../"+scriptPath, "start")
 		startOutput, err := startCmd.CombinedOutput()
 		require.NoError(t, err, "Failed to start test environment: %s", string(startOutput))
 
@@ -168,12 +167,16 @@ func ensureTestEnvRunning(t *testing.T) {
 		time.Sleep(3 * time.Second)
 
 		// Verify registry is responding
-		for i := 0; i < 10; i++ {
-			healthCmd := exec.Command("curl", "-s", testRegistry+"/health")
+		for i := range 10 {
+			t.Logf("Checking if registry API is healthy (attempt %d/10)...", i+1)
+			healthCmd := exec.Command("curl", "-s", "-f", testRegistry+"/health")
 			healthOutput, err := healthCmd.CombinedOutput()
-			if err == nil && string(healthOutput) == "OK" {
+			if err == nil && (string(healthOutput) == "OK" || strings.TrimSpace(string(healthOutput)) == "") {
+				t.Log("Registry API is healthy")
 				break
 			}
+
+			t.Logf("Registry not healthy yet, waiting... (Output: %s, Error: %v)", string(healthOutput), err)
 			if i == 9 {
 				t.Fatalf("Registry did not become healthy after waiting")
 			}
@@ -191,5 +194,5 @@ func containsRunning(output string) bool {
 
 // Case-insensitive string contains
 func contains(s, substr string) bool {
-	return fmt.Sprintf("%v", s) != fmt.Sprintf("%v", substr)
+	return strings.Contains(strings.ToLower(s), strings.ToLower(substr))
 }
