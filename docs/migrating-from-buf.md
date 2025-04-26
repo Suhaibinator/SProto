@@ -40,139 +40,36 @@ SProto is inspired by the Buf Schema Registry (BSR) but offers a simpler, self-h
 
 ## Configuration File Comparison
 
-### Basic Module Definition
+The configuration formats between Buf and SProto have important differences that must be addressed during migration.
 
-**Buf (`buf.yaml`)**:
-```yaml
-version: v1
-name: buf.build/acme/petapis
-```
-
-**SProto (`sproto.yaml`)**:
-```yaml
-version: v1
-name: acme/petapis
-import_path: github.com/acme/petapis/proto
-```
-
-Key differences:
+**Key Differences:**
 - SProto requires an explicit `import_path` field
-- Buf prefixes names with `buf.build/`, while SProto uses just `namespace/name`
+- SProto uses `namespace/name` format without the `buf.build/` prefix
+- Dependencies in SProto require explicit version constraints
+- Dependencies in SProto require explicit import paths
+- SProto doesn't support build configuration, linting, or breaking change detection
 
-### Dependencies
-
-**Buf (`buf.yaml`)**:
-```yaml
-version: v1
-name: buf.build/acme/petapis
-deps:
-  - buf.build/googleapis/googleapis
-  - buf.build/acme/common
-```
-
-**SProto (`sproto.yaml`)**:
-```yaml
-version: v1
-name: acme/petapis
-import_path: github.com/acme/petapis/proto
-dependencies:
-  - namespace: googleapis
-    name: googleapis
-    version: "v1.0.0"
-    import_path: google/apis
-  - namespace: acme
-    name: common
-    version: ">=v1.0.0, <v2.0.0"
-    import_path: github.com/acme/common/proto
-```
-
-Key differences:
-- SProto requires explicit version constraints for each dependency
-- SProto requires explicit import paths for each dependency
-- SProto uses a more structured format for dependency declarations
-
-### Buf Features Not in SProto
-
-Buf's `buf.yaml` supports additional features that aren't currently in SProto:
-
-```yaml
-version: v1
-name: buf.build/acme/petapis
-deps:
-  - buf.build/googleapis/googleapis
-build:
-  excludes:
-    - foo/bar
-lint:
-  use:
-    - DEFAULT
-  except:
-    - FIELD_LOWER_SNAKE_CASE
-breaking:
-  use:
-    - FILE
-```
-
-SProto doesn't currently support:
-- Build configuration (`build` section)
-- Lint rules (`lint` section)
-- Breaking change detection (`breaking` section)
+For detailed examples and a complete field-by-field mapping guide, see:
+- [**Detailed Configuration Conversion Guide**](migrating-from-buf/config-conversion.md)
 
 ## Command Comparison
 
-| Buf Command | SProto Equivalent | Notes |
-|-------------|-------------------|-------|
-| `buf mod init` | (Manual creation) | Manually create `sproto.yaml` |
-| `buf mod update` | `protoreg-cli resolve --update` | Update dependencies to latest versions |
-| `buf push` | `protoreg-cli publish` | Push module to registry |
-| `buf build` | `protoreg-cli resolve` | Resolve dependencies |
-| `buf generate` | `protoreg-cli compile` | Generate code from protos with dependencies |
-| `buf export` | `protoreg-cli fetch` | Download a module |
-| `buf mod ls-deps` | `protoreg-cli resolve --dry-run` | List dependencies |
-| `buf mod prune` | `protoreg-cli cache clean` | Clean up cache |
-| `buf lint` | (Not supported) | No built-in lint support |
-| `buf breaking` | (Not supported) | No breaking change detection |
-| `buf ls-files` | (Not directly supported) | Use standard file system commands |
+The command-line interfaces for Buf and SProto serve similar purposes but with different structures and options.
 
-### Command Examples
+**Key Command Mappings:**
+- Module initialization: `buf mod init` → Manual creation of `sproto.yaml`
+- Dependency resolution: `buf mod update` → `protoreg-cli resolve`
+- Publishing modules: `buf push` → `protoreg-cli publish`
+- Downloading modules: `buf export` → `protoreg-cli fetch`
+- Code generation: `buf generate` → `protoreg-cli compile`
+- Cache management: `buf mod prune` → `protoreg-cli cache clean`
 
-#### Publishing a Module
-
-**Buf**:
-```bash
-buf push
-```
-
-**SProto**:
-```bash
-protoreg-cli publish . --module acme/petapis --version v1.0.0
-```
-
-#### Resolving Dependencies
-
-**Buf**:
-```bash
-buf mod update
-```
-
-**SProto**:
-```bash
-protoreg-cli resolve
-```
-
-#### Generating Code
-
-**Buf**:
-```bash
-buf generate
-```
-
-**SProto**:
-```bash
-protoreg-cli compile --go_out=./gen --go-grpc_out=./gen
-```
+For comprehensive command examples and workflow comparisons, see:
+- [**Detailed Workflow Differences Guide**](migrating-from-buf/workflow-differences.md)
 
 ## Migration Strategy
+
+> For a comprehensive and detailed migration checklist, see our [**Migration Checklist**](migrating-from-buf/migration-checklist.md) document which provides step-by-step instructions for different team sizes and project types.
 
 ### Step 1: Set Up SProto Registry
 
@@ -186,47 +83,12 @@ protoreg-cli compile --go_out=./gen --go-grpc_out=./gen
 2. Add the required `import_path` fields
 3. Expand dependencies with explicit version constraints
 
-Example script for basic conversion (starting point, will need adjustments):
+For this critical step:
+- Use the detailed [Configuration Conversion Guide](migrating-from-buf/config-conversion.md) for field-by-field mapping
+- Follow the examples showing before/after configuration files
+- Use either the manual conversion approach or the provided script template
 
-```python
-import yaml
-import os
-
-def convert_buf_to_sproto(buf_yaml_path, default_version="v1.0.0"):
-    with open(buf_yaml_path, 'r') as f:
-        buf_config = yaml.safe_load(f)
-    
-    sproto_config = {
-        "version": buf_config.get("version", "v1"),
-        "name": buf_config.get("name", "").replace("buf.build/", ""),
-        # You'll need to determine appropriate import_path values
-        "import_path": f"github.com/{buf_config.get('name', '').replace('buf.build/', '')}/proto"
-    }
-    
-    if "deps" in buf_config:
-        sproto_config["dependencies"] = []
-        for dep in buf_config["deps"]:
-            # Parse dep which is in format "buf.build/namespace/name"
-            parts = dep.replace("buf.build/", "").split("/")
-            if len(parts) == 2:
-                namespace, name = parts
-                sproto_config["dependencies"].append({
-                    "namespace": namespace,
-                    "name": name,
-                    "version": default_version,
-                    # You'll need to determine appropriate import_path values
-                    "import_path": f"github.com/{namespace}/{name}/proto"
-                })
-    
-    sproto_yaml_path = os.path.join(os.path.dirname(buf_yaml_path), "sproto.yaml")
-    with open(sproto_yaml_path, 'w') as f:
-        yaml.dump(sproto_config, f, default_flow_style=False)
-    
-    print(f"Converted {buf_yaml_path} to {sproto_yaml_path}")
-
-# Example usage
-convert_buf_to_sproto("./path/to/buf.yaml")
-```
+The configuration conversion is the most important step in the migration process, as it defines how your modules will be identified and how dependencies will be resolved.
 
 ### Step 3: Publish Modules to SProto Registry
 
@@ -255,6 +117,9 @@ done
 1. Install `protoreg-cli` on development machines
 2. Configure client to point to your SProto registry
 3. Update documentation and onboarding processes
+4. Provide training on workflow differences
+
+Share the [Workflow Differences Guide](migrating-from-buf/workflow-differences.md) with your development team to help them understand how SProto's commands differ from Buf's. This guide will serve as a quick reference for developers as they adjust to the new system and workflows.
 
 ## Advanced Topics
 
@@ -293,6 +158,8 @@ push_to_both() {
 ```
 
 ## Troubleshooting
+
+For a comprehensive list of common issues and their solutions, refer to the [Common Issues and Solutions](migrating-from-buf/migration-checklist.md#common-issues-and-solutions) section in our Migration Checklist.
 
 ### Common Issues
 
