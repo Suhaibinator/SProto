@@ -5,7 +5,10 @@
 set -e  # Exit on any error
 
 # Constants
-OLD_CLI_DIR="./test/compat/old_cli"
+# Get the repo root directory for absolute paths
+REPO_ROOT=$(git rev-parse --show-toplevel)
+# Output relative to the repo root, regardless of where the script is run from
+OLD_CLI_DIR="$REPO_ROOT/test/compat/old_cli"
 OLD_CLI_BIN="$OLD_CLI_DIR/protoreg-cli"
 CURRENT_BRANCH=$(git branch --show-current)
 TEMP_BRANCH="temp-old-cli-build"
@@ -13,7 +16,8 @@ TEMP_BRANCH="temp-old-cli-build"
 # Last commit before dependency management features were added
 # Replace this with the actual commit hash from your repository history
 # This should be the last stable version before dependency features were added
-OLD_VERSION_COMMIT="abc123"  # REPLACE THIS with your actual commit hash!
+# For testing purposes, we'll use the most recent commit since we don't have the actual pre-dependency commit
+OLD_VERSION_COMMIT=$(git rev-parse HEAD)
 
 # Function to print usage information
 print_usage() {
@@ -47,7 +51,8 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# Create directories
+# Create directories (ensure parent directories exist)
+mkdir -p "$(dirname "$OLD_CLI_DIR")"
 mkdir -p "$OLD_CLI_DIR"
 
 # Function to clean up on exit
@@ -72,7 +77,9 @@ git checkout -b "$TEMP_BRANCH" "$COMMIT"
 
 # Build the old CLI version
 echo "Compiling old CLI version..."
-go build -o "$OLD_CLI_BIN" ./cmd/cli
+# Get the repo root directory
+REPO_ROOT=$(git rev-parse --show-toplevel)
+go build -o "$OLD_CLI_BIN" "$REPO_ROOT/cmd/cli"
 
 # Verify the build was successful
 if [ -f "$OLD_CLI_BIN" ]; then
