@@ -145,19 +145,22 @@ func TestPublishWorkflow(t *testing.T) {
 
 // Helper function to ensure test environment is running
 func ensureTestEnvRunning(t *testing.T) {
-	// Check if the test script exists
-	scriptPath := "../scripts/test-env.sh"
-	if _, err := os.Stat(scriptPath); os.IsNotExist(err) {
-		t.Fatalf("Test environment script not found at: %s", scriptPath)
+	// Check if the test script exists relative to project root
+	scriptPath := "scripts/test-env.sh"
+	// Check existence relative to the test file's location first for safety
+	if _, err := os.Stat("../" + scriptPath); os.IsNotExist(err) {
+		t.Fatalf("Test environment script not found relative to test file at: ../%s", scriptPath)
 	}
 
 	// Start test environment if it's not already running
 	cmd := exec.CommandContext(context.Background(), scriptPath, "status")
+	cmd.Dir = ".." // Run from project root
 	output, err := cmd.CombinedOutput()
 
 	if err != nil || !containsRunning(string(output)) {
 		t.Log("Starting test environment...")
 		startCmd := exec.Command(scriptPath, "start")
+		startCmd.Dir = ".." // Run from project root
 		startOutput, err := startCmd.CombinedOutput()
 		require.NoError(t, err, "Failed to start test environment: %s", string(startOutput))
 

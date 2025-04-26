@@ -149,21 +149,24 @@ func readFileContent(path string) (string, error) {
 // Example: "google/protobuf/../protobuf/timestamp.proto" -> "google/protobuf/timestamp.proto"
 // Example: ".\foo\bar.proto" -> "foo/bar.proto"
 func NormalizeImportPath(importPath string) string {
-	// 1. Replace backslashes with forward slashes
-	p := filepath.ToSlash(importPath)
-
-	// 2. Clean the path using path.Clean (removes ., .., collapses //)
+	// 1. Clean the path using path.Clean (removes ., .., collapses //)
 	// Note: path.Clean might add a leading '.' if the result is empty or just '.',
-	// and might remove a trailing slash.
-	cleaned := path.Clean(p)
+	// and might remove a trailing slash. It uses OS-specific separators internally.
+	cleaned := path.Clean(importPath)
 
-	// 3. Handle edge cases from path.Clean
-	if cleaned == "." {
-		return "" // Return empty string for paths resolving to current dir
+	// 2. Replace backslashes with forward slashes explicitly AFTER cleaning
+	cleaned = strings.ReplaceAll(cleaned, "\\", "/")
+
+	// 3. Remove leading "./" if present
+	cleaned = strings.TrimPrefix(cleaned, "./")
+
+	// 4. Handle edge case where cleaning results in just "." or empty string
+	if cleaned == "." || cleaned == "" {
+		// Decide on behavior: return "" or "."? Let's return "" for now based on previous logic.
+		return ""
 	}
 
-	// path.Clean might remove leading slashes if not absolute, which is usually desired for proto imports.
-	// It also removes trailing slashes.
+	// path.Clean removes trailing slashes.
 
 	return cleaned
 }
