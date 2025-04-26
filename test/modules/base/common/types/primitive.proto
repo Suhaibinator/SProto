@@ -1,0 +1,30 @@
+syntax = "proto3";
+
+package test.common.types;
+
+option go_package = "github.com/test/common/proto/types";
+
+// Timestamp represents a point in time independent of any time zone.
+message Timestamp {
+  // Represents seconds of UTC time since Unix epoch
+  // 1970-01-01T00:00:00Z.
+  int64 seconds = 1;
+
+  // Non-negative fractions of a second at nanosecond resolution.
+  int32 nanos = 2;
+}
+
+// Money represents an amount of currency with its name.
+message Money {
+  // The amount in the smallest currency unit (e.g., cents for USD).
+  int64 amount = 1;
+  
+  // The 3-letter currency code as defined in ISO 4217.
+  string currency_code = 2;
+}
+
+// UUID represents a universally unique identifier.
+message UUID {
+  // UUID as a string in 8-4-4-4-12 format.
+  string value = 1;
+}

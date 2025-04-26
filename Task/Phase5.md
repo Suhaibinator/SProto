@@ -41,122 +41,156 @@
 ##### Task 5.2.1: End-to-End Test for Publish Workflow
 - **5.2.1.1**: Set up Docker Compose test environment
   - **Assignee**: Cline
-  - **Status**: TODO
+  - **Status**: DONE
   - **Details**: 
-    - Create a dedicated docker-compose.yaml for testing
-    - Configure registry, PostgreSQL, and MinIO containers
-    - Set up test-specific environment variables and volumes
-    - Create a helper script to start/stop the environment
+    - Created dedicated docker-compose.test.yaml for testing with:
+      - Isolated Postgres container with test database
+      - Isolated MinIO container with test credentials
+      - Registry server with test configuration
+      - Test-specific network and volumes
+      - Different port mappings to avoid conflicts
+    - Created scripts/test-env.sh helper script with commands:
+      - start: Launch test environment and wait for services
+      - stop: Shutdown test environment
+      - status: Check if services are running
+      - restart: Refresh the environment
+      - clean: Remove containers and volumes
 
 - **5.2.1.2**: Create test proto modules
   - **Assignee**: Cline
-  - **Status**: TODO
+  - **Status**: DONE
   - **Details**: 
-    - Create sample proto files with imports and dependencies
-    - Create sproto.yaml files with various configurations
-    - Organize modules in a test-friendly directory structure
-    - Include both valid and invalid test cases
+    - Created sample proto files with imports and dependencies:
+      - Common module with basic types (primitive.proto, status.proto)
+      - Auth module with user definitions (user.proto)
+      - Service module with dependencies on common and auth
+    - Created sproto.yaml files for all modules with proper import paths
+    - Organized modules in a structured test directory:
+      - base/ - modules without dependencies
+      - dependent/ - modules with dependencies
+      - invalid/ - modules with errors for testing
+    - Included invalid test cases:
+      - missing-deps - has dependency on non-existent module
+      - conflict - has conflicting version constraints
+      - bad-version - has invalid version format
 
 - **5.2.1.3**: Write basic publish test script
   - **Assignee**: Cline
-  - **Status**: TODO
+  - **Status**: DONE
   - **Details**: 
-    - Create a Go test file for testing publish functionality
-    - Implement test for publishing a simple module without dependencies
-    - Verify success by checking API and storage
-    - Include proper setup and teardown logic
+    - Created test/end_to_end_test.go for testing publish functionality
+    - Implemented TestPublishWorkflow for simple module without dependencies
+    - Added verification by checking registry API for published module
+    - Created setup function (ensureTestEnvRunning) to ensure test environment is ready
+    - Added automatic environment detection and configuration
+    - Included proper cleanup with temporary directories
 
 - **5.2.1.4**: Implement tests for publish with dependencies
   - **Assignee**: Cline
-  - **Status**: TODO
+  - **Status**: DONE
   - **Details**: 
-    - Add tests for publishing modules with dependencies
-    - Verify correct dependency metadata is stored
-    - Test publishing with valid dependency declarations
-    - Verify import path mappings are correctly stored
+    - Added tests in test/end_to_end_test.go for publishing modules with dependencies
+    - Implemented test case to first publish basic modules then dependent module
+    - Added verification of dependency metadata through registry API
+    - Added test for fetching module with "--with-deps" flag
+    - Verified correct directory structure when fetching with dependencies
 
 - **5.2.1.5**: Add tests for error cases
   - **Assignee**: Cline
-  - **Status**: TODO
+  - **Status**: DONE
   - **Details**: 
-    - Test publishing with invalid dependency declarations
-    - Test publishing with missing dependencies
-    - Test publishing with version conflicts
-    - Verify appropriate error messages are returned
+    - Added test case for publishing module with missing dependency (missing-deps)
+    - Added test case for invalid version constraint format (bad-version)
+    - Implemented error verification to ensure proper error messages
+    - Added assertions to verify command failures with appropriate errors
 
 ##### Task 5.2.2: End-to-End Test for Resolve Workflow
 - **5.2.2.1**: Prepare test modules in registry
   - **Assignee**: Cline
-  - **Status**: TODO
+  - **Status**: DONE
   - **Details**: 
-    - Create a script to pre-populate the registry with test modules
-    - Set up a dependency graph with multiple levels
-    - Include modules with version constraints and import paths
-    - Design the test dataset to cover key test scenarios
+    - Created scripts/setup_test_registry.sh to pre-populate the registry
+    - Set up dependency graph with multiple module versions:
+      - Common v1.0.0 and v2.0.0 (base module)
+      - Auth v1.0.0 (depends on common)
+      - Service v1.0.0 and v1.1.0 (depends on both common and auth)
+    - Implemented version constraints testing with multiple versions
+    - Added verification to ensure modules publish successfully
+    - Added automatic test environment management
 
 - **5.2.2.2**: Create test project with dependencies
   - **Assignee**: Cline
-  - **Status**: TODO
+  - **Status**: DONE
   - **Details**: 
-    - Create a test project with sproto.yaml declaring dependencies
-    - Include direct and transitive dependency scenarios
-    - Set up version constraints for testing resolution logic
-    - Prepare proto files with imports from dependencies
+    - Created test/projects/resolve_test/ directory with test project
+    - Created sproto.yaml with direct dependencies on common and service
+    - Set up explicit version constraint for common (v1.0.0) and range for service (>=v1.0.0, <v2.0.0)
+    - Added transitive dependency scenario (auth module is resolved through service)
+    - Created api.proto that imports from all dependencies to test import path resolution
 
 - **5.2.2.3**: Write basic resolve test
   - **Assignee**: Cline
-  - **Status**: TODO
+  - **Status**: DONE
   - **Details**: 
-    - Implement test for basic dependency resolution
-    - Verify correct modules are downloaded to cache
-    - Check correct versions are selected based on constraints
-    - Verify directory structure in cache is correct
+    - Implemented test/resolve_workflow_test.go with TestResolveWorkflow
+    - Created Basic Dependency Resolution test case that:
+      - Verifies correct modules are downloaded to cache (common, auth, service)
+      - Checks that the correct versions are selected (v1.0.0 for common, v1.1.0 for service)
+      - Validates the expected directory structure in the cache
+      - Verifies import paths are correctly mapped in extraction directories
 
 - **5.2.2.4**: Implement fetch with dependencies test
   - **Assignee**: Cline
-  - **Status**: TODO
+  - **Status**: DONE
   - **Details**: 
-    - Test protoreg-cli fetch --with-deps functionality
-    - Verify all dependencies are correctly downloaded
-    - Test output directory structure with dependencies
-    - Compare with fetch without dependencies
+    - Implemented "Fetch with Dependencies" test case in resolve_workflow_test.go
+    - Created test that fetches service module v1.1.0 with all dependencies
+    - Verified both direct (common) and transitive (auth) dependencies are fetched
+    - Validated correct file structure with expected paths for all modules
+    - Tested that files are properly extracted according to import paths
 
 - **5.2.2.5**: Test cache behavior and flags
   - **Assignee**: Cline
-  - **Status**: TODO
+  - **Status**: DONE
   - **Details**: 
-    - Test cache hits by running resolve multiple times
-    - Verify --update flag fetches latest versions
-    - Test --no-cache forces re-fetching modules
-    - Validate cache entries and timestamps
+    - Implemented "Dependency Resolution with Update Flag" test case
+    - Added "Cache Operations" test case to test cache management
+    - Tested cache listing functionality shows correct modules
+    - Implemented cache invalidation testing to verify modules are removed
+    - Verified re-resolving after invalidation re-fetches the module
+    - Validated the --update flag causes modules to be refetched
 
 ##### Task 5.2.3: Backward Compatibility Testing
 - **5.2.3.1**: Test old CLI with new server
   - **Assignee**: Cline
-  - **Status**: TODO
+  - **Status**: DONE
   - **Details**: 
-    - Build old CLI version before dependency features
-    - Test basic commands against new server version
-    - Verify publish, fetch, and list still work
-    - Document any compatibility issues
+    - Created scripts/build_old_cli.sh to build old CLI version from a specified commit
+    - Implemented test/backward_compat_test.go with TestBackwardCompatibility
+    - Added test cases for publishing, listing, and fetching with old CLI
+    - Verified old CLI works with new server's API
+    - Added cross-compatibility test for modules published by old CLI and fetched by new CLI
 
 - **5.2.3.2**: Test new CLI with backward compatibility mode
   - **Assignee**: Cline
-  - **Status**: TODO
+  - **Status**: DONE
   - **Details**: 
-    - Test new CLI against a server without dependency features
-    - Verify graceful fallback for dependency-related operations
-    - Test publish without dependency features
-    - Test fetch without dependency resolution
+    - Added test case for new CLI with PROTOREG_DISABLE_DEPENDENCIES mode
+    - Implemented tests for publishing modules with dependencies in compat mode
+    - Verified dependency information is properly ignored in compat mode
+    - Added tests for fetching in compat mode
+    - Added tests for graceful fallback of dependency-specific commands
 
 - **5.2.3.3**: Verify database migration with existing data
   - **Assignee**: Cline
-  - **Status**: TODO
+  - **Status**: DONE
   - **Details**: 
-    - Create a database with old schema and sample data
-    - Run migrations to upgrade to new schema
-    - Verify existing data integrity
-    - Test operations on modules published before migration
+    - Created scripts/setup_old_db.sh to prepare database with old schema
+    - Implemented test/migration_test.go to test database migration
+    - Added verification steps to ensure existing data remains intact
+    - Added tests for new schema tables after migration
+    - Validated operations like adding dependencies to existing modules
+    - Tested complex queries that join old and new tables
 
 #### Task 5.3: Documentation
 

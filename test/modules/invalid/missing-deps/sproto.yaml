@@ -1,0 +1,10 @@
+version: v1
+name: test/missing-deps
+import_path: github.com/test/missing-deps/proto
+
+# This module has a dependency on a module that doesn't exist in the registry
+dependencies:
+  - namespace: test
+    name: nonexistent
+    version: "v1.0.0"
+    import_path: github.com/test/nonexistent/proto

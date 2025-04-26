@@ -1,0 +1,15 @@
+version: v1
+name: test/conflict
+import_path: github.com/test/conflict/proto
+
+# This module has conflicting dependency version constraints
+# (common v1.0.0 vs common v2.0.0)
+dependencies:
+  - namespace: test
+    name: common
+    version: "v1.0.0"
+    import_path: github.com/test/common/proto
+  - namespace: test
+    name: service
+    version: "v1.0.0"
+    import_path: github.com/test/service/proto

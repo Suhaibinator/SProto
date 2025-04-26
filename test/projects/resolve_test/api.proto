@@ -1,0 +1,61 @@
+syntax = "proto3";
+
+package test.resolve_test;
+
+option go_package = "github.com/test/resolve-test-project/proto";
+
+// Import types from our dependencies
+import "github.com/test/common/proto/types/primitive.proto";
+import "github.com/test/common/proto/types/status.proto";
+import "github.com/test/service/proto/user_service/service.proto";
+
+// ResolveTestService is a simple example service that uses types from dependencies
+service ResolveTestService {
+  // CreateUserWithMetadata creates a user with additional metadata
+  rpc CreateUserWithMetadata(CreateUserWithMetadataRequest) returns (CreateUserWithMetadataResponse) {}
+  
+  // GetUserStatus gets the status of a user
+  rpc GetUserStatus(GetUserStatusRequest) returns (GetUserStatusResponse) {}
+}
+
+// CreateUserWithMetadataRequest combines the user service request with additional metadata
+message CreateUserWithMetadataRequest {
+  // User creation request from the service module
+  test.service.user_service.CreateUserRequest user_request = 1;
+  
+  // Additional metadata timestamp
+  test.common.types.Timestamp created_at = 2;
+  
+  // Session identifier
+  test.common.types.UUID session_id = 3;
+}
+
+// CreateUserWithMetadataResponse contains the result of user creation with metadata
+message CreateUserWithMetadataResponse {
+  // The user creation response from the service
+  test.service.user_service.CreateUserResponse service_response = 1;
+  
+  // The operation status
+  test.common.types.Status status = 2;
+  
+  // Additional billing information
+  test.common.types.Money subscription_fee = 3;
+}
+
+// GetUserStatusRequest is a request to get user status
+message GetUserStatusRequest {
+  // User ID to fetch
+  string user_id = 1;
+}
+
+// GetUserStatusResponse contains the user status
+message GetUserStatusResponse {
+  // Whether the user exists
+  bool exists = 1;
+  
+  // The operation status
+  test.common.types.Status status = 2;
+  
+  // User info if the user exists
+  test.service.user_service.GetUserResponse user_data = 3;
+}

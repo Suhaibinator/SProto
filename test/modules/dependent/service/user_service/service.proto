@@ -1,0 +1,102 @@
+syntax = "proto3";
+
+package test.service.user_service;
+
+option go_package = "github.com/test/service/proto/user_service";
+
+import "github.com/test/common/proto/types/primitive.proto";
+import "github.com/test/common/proto/types/status.proto";
+import "github.com/test/auth/proto/user/user.proto";
+
+// UserService provides methods to manage users.
+service UserService {
+  // CreateUser creates a new user.
+  rpc CreateUser(CreateUserRequest) returns (CreateUserResponse) {}
+  
+  // GetUser retrieves a user by ID.
+  rpc GetUser(GetUserRequest) returns (GetUserResponse) {}
+  
+  // ListUsers retrieves a list of users.
+  rpc ListUsers(ListUsersRequest) returns (ListUsersResponse) {}
+  
+  // DeleteUser deletes a user by ID.
+  rpc DeleteUser(DeleteUserRequest) returns (DeleteUserResponse) {}
+}
+
+// CreateUserRequest is the request for the CreateUser method.
+message CreateUserRequest {
+  // User creation request from the auth module
+  test.auth.user.CreateUserRequest user_request = 1;
+  
+  // Optional organization ID for the user.
+  string organization_id = 2;
+}
+
+// CreateUserResponse is the response for the CreateUser method.
+message CreateUserResponse {
+  // Created user information
+  test.auth.user.User user = 1;
+  
+  // Unique ID assigned to the user
+  test.common.types.UUID user_uuid = 2;
+  
+  // Timestamp of user creation
+  test.common.types.Timestamp created_at = 3;
+  
+  // Status of the operation
+  test.common.types.Status status = 4;
+}
+
+// GetUserRequest is the request for the GetUser method.
+message GetUserRequest {
+  // ID of the user to retrieve.
+  string user_id = 1;
+}
+
+// GetUserResponse is the response for the GetUser method.
+message GetUserResponse {
+  // The requested user.
+  test.auth.user.User user = 1;
+  
+  // Status of the operation
+  test.common.types.Status status = 2;
+}
+
+// ListUsersRequest is the request for the ListUsers method.
+message ListUsersRequest {
+  // Maximum number of users to return.
+  int32 page_size = 1;
+  
+  // Token for pagination.
+  string page_token = 2;
+  
+  // Optional filter by organization.
+  string organization_id = 3;
+}
+
+// ListUsersResponse is the response for the ListUsers method.
+message ListUsersResponse {
+  // List of users.
+  repeated test.auth.user.User users = 1;
+  
+  // Token for the next page.
+  string next_page_token = 2;
+  
+  // Total count of users matching the criteria.
+  int32 total_count = 3;
+  
+  // Status of the operation
+  test.common.types.Status status = 4;
+}
+
+// DeleteUserRequest is the request for the DeleteUser method.
+message DeleteUserRequest {
+  // ID of the user to delete.
+  string user_id = 1;
+}
+
+// DeleteUserResponse is the response for the DeleteUser method.
+message DeleteUserResponse {
+  // Status of the operation.
+  test.common.types.Status status = 1;
+}
